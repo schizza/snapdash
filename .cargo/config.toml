@@ -1,0 +1,13 @@
+# .cargo/config.toml
+[alias]
+build-linux = "build --release --target=x86_64-unknown-linux-gnu"
+build-windows = "build --release --target=x86_64-pc-windows-gnu"
+build-mac = "build --release"
+
+[target.x86_64-unknown-linux-gnu]
+linker = "x86_64-linux-gnu-gcc"
+
+[env]
+CC_x86_64_unknown_linux_gnu = "x86_64-linux-gnu-gcc"
+CXX_x86_64_unknown_linux_gnu = "x86_64-linux-gnu-g++"
+AR_x86_64_unknown_linux_gnu = "x86_64-linux-gnu-ar"

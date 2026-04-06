@@ -1,0 +1,54 @@
+[package]
+name = "snapdash"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+chrono = "0.4.42"
+iced = { version = "0.14.0", features = ["wgpu", "tokio"] }
+directories = "6.0.0"
+keyring = { version = "3.6.3", features = [
+  "apple-native",
+  "windows-native",
+  "sync-secret-service",
+  "vendored",
+] }
+reqwest = { version = "0.12.25", features = [
+  "json",
+  "rustls-tls",
+  "native-tls-vendored",
+] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tokio = { version = "1.48.0", features = [
+  "rt-multi-thread",
+  "macros",
+  "time",
+  "fs",
+] }
+tokio-tungstenite = { version = "0.28.0", features = [
+  "rustls-tls-webpki-roots",
+] }
+toml = "0.9.8"
+url = "2.5.7"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-quartz-core = "0.3.2"
+
+[patch.crates-io]
+iced = { path = "vendor/iced" }
+iced_winit = { path = "vendor/iced/winit" }
+iced_runtime = { path = "vendor/iced/runtime" }
+iced_program = { path = "vendor/iced/program" }
+iced_renderer = { path = "vendor/iced/renderer" }
+iced_widget = { path = "vendor/iced/widget" }
+iced_core = { path = "vendor/iced/core" }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = 0
