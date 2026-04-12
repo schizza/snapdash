@@ -13,6 +13,8 @@ pub struct Config {
     pub ha_token_present: bool,
     pub theme: ThemeKind,
     #[serde(default)]
+    pub debug_overlay: bool,
+    #[serde(default)]
     pub widgets: Vec<String>,
 }
 
@@ -22,6 +24,7 @@ impl Default for Config {
             ha_url: "http://localhost:8123".into(),
             theme: ThemeKind::default(),
             ha_token_present: false,
+            debug_overlay: false,
             widgets: Vec::new(),
         }
     }

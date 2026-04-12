@@ -3,6 +3,10 @@ name = "snapdash"
 version = "0.0.1"
 edition = "2024"
 
+[features]
+default = ["diagnostics"]
+diagnostics = []
+
 [dependencies]
 anyhow = "1.0.100"
 chrono = "0.4.42"

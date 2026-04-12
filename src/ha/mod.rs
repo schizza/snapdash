@@ -2,4 +2,4 @@ pub mod rest;
 pub mod types;
 pub mod ws;
 
-pub use types::{EntityState, HaEvent};
+pub use types::{EntityState, HaConnectionConfig, HaEvent};

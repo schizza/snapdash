@@ -1,13 +1,13 @@
+use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger as log;
 use crate::logger::LogType;
-use std::collections::{HashMap, VecDeque};
-use std::time::Instant;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::{Duration, Instant};
 
-use iced::window;
 use iced::{Element, Task};
+use iced::{Subscription, window};
 
 use crate::config::Config;
-use crate::ha::{EntityState, HaEvent};
 use crate::secrets;
 use crate::theme::ThemeKind;
 
@@ -20,15 +20,56 @@ pub enum WindowKind {
 pub struct WindowState {
     pub kind: WindowKind,
     pub entity: EntityWindowState,
+    pub debug: WindowDebugState,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct EntityWindowState {
     pub entity_id: String,
-    pub selected_fields: std::collections::BTreeSet<String>,
     pub last: Option<EntityState>,
     pub pulse: f32, // TODO: Replace with Animation/spring. Now just easy "animation paramter" (0..1), později nahradit Animation/spring
     pub hovered: bool,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct WindowDebugState {
+    pub redraw_total: u64,
+    pub redraws_last_second: usize,
+    pub last_redraw_at: Option<Instant>,
+    pub last_redraw_delta_ms: Option<f32>,
+    recent_redraws: VecDeque<Instant>,
+}
+
+impl WindowDebugState {
+    fn record_redraw(&mut self, now: Instant) {
+        if let Some(previous) = self.last_redraw_at {
+            self.last_redraw_delta_ms =
+                Some(now.saturating_duration_since(previous).as_secs_f32() * 1000.0);
+        }
+
+        self.last_redraw_at = Some(now);
+        self.redraw_total = self.redraw_total.saturating_add(1);
+        self.recent_redraws.push_back(now);
+        self.prune(now);
+    }
+
+    fn prune(&mut self, now: Instant) {
+        while matches!(
+            self.recent_redraws.front(),
+            Some(at) if now.saturating_duration_since(*at) > Duration::from_secs(1)
+        ) {
+            self.recent_redraws.pop_front();
+        }
+
+        self.redraws_last_second = self.recent_redraws.len();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SettingsSensor {
+    pub entity_id: String,
+    pub friendly_name: String,
+    pub search_key: String,
 }
 
 #[derive(Debug)]
@@ -37,7 +78,7 @@ pub struct Snapdash {
     pub theme: ThemeKind,
 
     pub ha_connected: bool,
-    pub ha_rx: Option<tokio::sync::mpsc::UnboundedReceiver<HaEvent>>,
+    pub ha_connection: Option<HaConnectionConfig>,
     pub ha_token_draft: String,
 
     pub windows: HashMap<window::Id, WindowState>,
@@ -46,8 +87,16 @@ pub struct Snapdash {
     pub theme_options: Vec<ThemeKind>,
     pub status: String,
 
-    pub entities: Vec<EntityState>,
+    pub entities_by_id: HashMap<String, EntityState>,
+    pub entity_windows: HashMap<String, window::Id>,
     pub boot_open_done: bool,
+
+    pub settings_sensors: Vec<SettingsSensor>,
+    pub selected_widgets: HashSet<String>,
+    pub active_settings_sensors: Vec<SettingsSensor>,
+
+    pub entity_search_query: String,
+    pub debug_now: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +104,8 @@ pub enum Message {
     Noop,
     OpenSettings,
     OpenEntity(String),
+    CloseWindow(window::Id),
+    QuitApp,
     WindowClosed(window::Id),
     //  WindowOpened(window::Id, WindowKind),
     WindowActuallyOpened(window::Id),
@@ -62,26 +113,34 @@ pub enum Message {
     ThemeSelected(ThemeKind),
     SaveConfig,
     ToggleWidget(String),
+    #[cfg(feature = "diagnostics")]
+    DebugOverlayToggled(bool),
 
     // Home Assistant
     ConnectHa,
     HaEvent(HaEvent),
-    HaInitialStates(Vec<EntityState>),
     HaUrlChanged(String),
     HaTokenChanged(String),
     HaTokenDelete,
 
     // UI events
-    ToggleField { window: window::Id, field: String },
+    ToggleField {
+        window: window::Id,
+        field: String,
+    },
     SavePressed,
     Saved,
     HaTokenDraftChanged(String),
     ClearStatus,
-    OpenEntityPressed,
-    Tick(Instant),
+    WindowRedraw(window::Id, Instant),
     ConfigLoad(Result<Config, String>),
     StartDrag(window::Id),
-    EntityHover { window: window::Id, on: bool },
+    EntityHover {
+        window: window::Id,
+        on: bool,
+    },
+
+    EntitySearchChanged(String),
 }
 
 impl Snapdash {
@@ -90,14 +149,20 @@ impl Snapdash {
             config: Config::default(),
             theme: ThemeKind::default(),
             ha_connected: false,
-            ha_rx: None,
+            ha_connection: None,
             ha_token_draft: String::new(),
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
             windows: HashMap::new(),
             pending_opens: VecDeque::new(),
-            entities: Vec::new(),
+            entities_by_id: HashMap::new(),
+            entity_windows: HashMap::new(),
             boot_open_done: false,
+            settings_sensors: Vec::new(),
+            selected_widgets: HashSet::new(),
+            active_settings_sensors: Vec::new(),
+            entity_search_query: String::new(),
+            debug_now: Instant::now(),
         }
     }
     pub fn boot() -> (Self, Task<Message>) {
@@ -109,6 +174,207 @@ impl Snapdash {
         );
 
         (state, load_task)
+    }
+
+    fn rebuild_active_settings_sensors(&mut self) {
+        self.active_settings_sensors = self
+            .settings_sensors
+            .iter()
+            .filter(|sensor| self.selected_widgets.contains(&sensor.entity_id))
+            .cloned()
+            .collect();
+    }
+
+    pub fn rebuild_selected_widgets(&mut self) {
+        self.selected_widgets = self.config.widgets.iter().cloned().collect();
+        self.rebuild_active_settings_sensors();
+    }
+
+    pub fn rebuild_settings_sensors(&mut self) {
+        let mut sensors: Vec<SettingsSensor> = self
+            .entities_by_id
+            .values()
+            .filter(|e| e.entity_id.starts_with("sensor."))
+            .map(|e| {
+                let friendly_name = e
+                    .attributes
+                    .get("friendly_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&e.entity_id)
+                    .to_string();
+
+                let search_key = format!(
+                    "{} {}",
+                    friendly_name.to_lowercase(),
+                    e.entity_id.to_lowercase()
+                );
+
+                SettingsSensor {
+                    entity_id: e.entity_id.clone(),
+                    friendly_name,
+                    search_key,
+                }
+            })
+            .collect();
+
+        sensors.sort_by(|a, b| {
+            a.friendly_name
+                .cmp(&b.friendly_name)
+                .then_with(|| a.entity_id.cmp(&b.entity_id))
+        });
+
+        self.settings_sensors = sensors;
+        self.rebuild_active_settings_sensors();
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        let redraw_events_needed = {
+            #[cfg(feature = "diagnostics")]
+            {
+                self.config.debug_overlay || self.windows.values().any(|win| win.entity.pulse > 0.0)
+            }
+
+            #[cfg(not(feature = "diagnostics"))]
+            {
+                self.windows.values().any(|win| win.entity.pulse > 0.0)
+            }
+        };
+
+        let redraw_events = if redraw_events_needed {
+            iced::event::listen_raw(|event, _status, id| match event {
+                iced::Event::Window(window::Event::RedrawRequested(now)) => {
+                    Some(Message::WindowRedraw(id, now))
+                }
+                _ => None,
+            })
+        } else {
+            Subscription::none()
+        };
+
+        let ha = if let Some(connection) = &self.ha_connection {
+            Subscription::run_with(connection.clone(), crate::ha::ws::connect).map(Message::HaEvent)
+        } else {
+            Subscription::none()
+        };
+
+        Subscription::batch([
+            window::close_events().map(Message::WindowClosed),
+            redraw_events,
+            ha,
+        ])
+    }
+
+    fn handle_redraw_requested(&mut self, id: window::Id, now: Instant) {
+        self.debug_now = now;
+
+        let Some(window) = self.windows.get_mut(&id) else {
+            return;
+        };
+
+        window.debug.record_redraw(now);
+
+        if let WindowKind::Entity { .. } = window.kind
+            && window.entity.pulse > 0.0
+        {
+            window.entity.pulse = (window.entity.pulse - 0.08).max(0.0);
+        }
+    }
+
+    #[cfg(feature = "diagnostics")]
+    fn seed_debug_overlay(&mut self, now: Instant) {
+        self.debug_now = now;
+
+        for window in self.windows.values_mut() {
+            // Treat enabling diagnostics as the first visible redraw so static
+            // windows do not stay stuck at zero until some unrelated repaint.
+            window.debug.record_redraw(now);
+        }
+    }
+
+    #[cfg(feature = "diagnostics")]
+    fn seed_debug_window(&mut self, id: window::Id, now: Instant) {
+        self.debug_now = now;
+
+        if let Some(window) = self.windows.get_mut(&id) {
+            window.debug.record_redraw(now);
+        }
+    }
+
+    fn set_window_entity_state(&mut self, entity_id: &str, new_state: &EntityState, pulse: bool) {
+        let Some(window_id) = self.entity_windows.get(entity_id).copied() else {
+            return;
+        };
+
+        let Some(window) = self.windows.get_mut(&window_id) else {
+            self.entity_windows.remove(entity_id);
+            return;
+        };
+
+        window.entity.last = Some(new_state.clone());
+
+        if pulse {
+            window.entity.pulse = 1.0;
+        }
+    }
+
+    fn apply_initial_states(&mut self, states: Vec<EntityState>) {
+        self.entities_by_id.clear();
+
+        for state in states {
+            let entity_id = state.entity_id.clone();
+
+            self.set_window_entity_state(&entity_id, &state, false);
+            self.entities_by_id.insert(entity_id, state.clone());
+        }
+        self.rebuild_settings_sensors();
+    }
+
+    fn apply_entity_state(&mut self, new_state: EntityState) {
+        let entity_id = new_state.entity_id.clone();
+
+        self.set_window_entity_state(&entity_id, &new_state, true);
+
+        let should_refresh_settings = match self.entities_by_id.get(&entity_id) {
+            None => true,
+            Some(old) => {
+                let old_is_sensor = old.entity_id.starts_with("sensor.");
+                let new_is_sensor = new_state.entity_id.starts_with("sensor.");
+
+                let old_name = old.attributes.get("friendly_name").and_then(|v| v.as_str());
+                let new_name = new_state
+                    .attributes
+                    .get("friendly_name")
+                    .and_then(|v| v.as_str());
+
+                old_is_sensor != new_is_sensor || old_name != new_name
+            }
+        };
+
+        self.entities_by_id.insert(entity_id, new_state);
+
+        if should_refresh_settings {
+            self.rebuild_settings_sensors();
+        }
+    }
+
+    fn handle_ha_event(&mut self, ev: HaEvent) {
+        match ev {
+            HaEvent::Connected => {
+                self.ha_connected = true;
+                self.set_status("HA Connected", LogType::Info);
+            }
+            HaEvent::Disconnected(why) => {
+                self.ha_connected = false;
+                self.set_status(format!("HA disconnected: {why}"), LogType::Warn);
+            }
+            HaEvent::InitialState(states) => {
+                self.apply_initial_states(states);
+            }
+            HaEvent::StateChanged { new_state } => {
+                self.apply_entity_state(new_state);
+            }
+            HaEvent::Other => {}
+        }
     }
 
     // Set status for status bar and log this message to log.
@@ -123,35 +389,8 @@ impl Snapdash {
         self.status = msg;
     }
 
-    fn apply_ha_event(&mut self, ev: HaEvent) {
-        match ev {
-            HaEvent::Connected => {
-                self.ha_connected = true;
-                self.set_status("HA connected", LogType::Info);
-            }
-            HaEvent::Disconnected(why) => {
-                self.ha_connected = false;
-                self.set_status(format!("HA disconnected: {why}"), LogType::Error);
-            }
-            HaEvent::StateChanged { new_state } => {
-                let id = new_state.entity_id.clone();
-                for win in self.windows.values_mut() {
-                    if let WindowKind::Entity { entity_id } = &win.kind {
-                        if entity_id == &id {
-                            win.entity.last = Some(new_state.clone());
-                            win.entity.pulse = 1.0;
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn is_entity_window_open(&self, entity_id: &str) -> bool {
-        self.windows
-            .values()
-            .any(|w| matches!(&w.kind, WindowKind::Entity { entity_id: eid } if eid == entity_id))
+        self.entity_windows.contains_key(entity_id)
     }
 
     fn find_window_id(
@@ -178,10 +417,32 @@ impl Snapdash {
         match message {
             Message::Noop => Task::none(),
 
+            Message::EntitySearchChanged(value) => {
+                self.entity_search_query = value;
+                Task::none()
+            }
+
+            #[cfg(feature = "diagnostics")]
+            Message::DebugOverlayToggled(enabled) => {
+                self.config.debug_overlay = enabled;
+                if enabled {
+                    self.seed_debug_overlay(Instant::now());
+                }
+                let cfg = self.config.clone();
+
+                Task::perform(async move { cfg.save_async().await }, |_| {
+                    Message::SaveConfig
+                })
+            }
+
             Message::HaTokenDelete => {
                 match secrets::delete_ha_token() {
                     Ok(_) => {
                         self.set_status("Token deleted from key-chain", LogType::Info);
+                        self.config.ha_token_present = false;
+                        self.ha_connection = None;
+                        self.ha_connected = false;
+                        log::warn("HA disconnected due to erased token.");
                     }
                     Err(s) => {
                         self.set_status(s, LogType::Error);
@@ -195,6 +456,7 @@ impl Snapdash {
                     Ok(cfg) => {
                         self.theme = cfg.theme;
                         self.config = cfg;
+                        self.rebuild_selected_widgets();
                         self.set_status("Config loaded", LogType::Info);
 
                         let mut tasks: Vec<Task<Message>> = Vec::new();
@@ -226,9 +488,11 @@ impl Snapdash {
                 Task::none()
             }
 
-            Message::StartDrag(id) => {
-                return iced::window::drag(id);
-            }
+            Message::StartDrag(id) => iced::window::drag(id),
+
+            Message::CloseWindow(id) => iced::window::close(id),
+
+            Message::QuitApp => iced::exit(),
 
             Message::EntityHover { window, on } => {
                 if let Some(w) = self.windows.get_mut(&window) {
@@ -243,27 +507,21 @@ impl Snapdash {
                 if let Some(widget) = self.config.widgets.iter().position(|e| e == &entity_id) {
                     // close widget
                     self.config.widgets.remove(widget);
-                    let to_close: Vec<_> = self
-                        .windows
-                        .iter()
-                        .filter_map(|(id, win)| match &win.kind {
-                            WindowKind::Entity { entity_id: e } if e == &entity_id => Some(*id),
-                            _ => None,
-                        })
-                        .collect();
 
-                    for id in to_close {
+                    if let Some(id) = self.entity_windows.remove(&entity_id) {
                         self.windows.remove(&id);
                         task.push(iced::window::close(id));
                     }
                 } else {
-                    // open widget
+                    // append new widget
                     self.config.widgets.push(entity_id.clone());
+                    task.push(Task::perform(async {}, move |_| {
+                        Message::OpenEntity(entity_id.clone())
+                    }));
                 }
+                self.rebuild_selected_widgets();
+                // save widget configuration
                 task.push(Task::perform(async {}, |_| Message::SaveConfig));
-                task.push(Task::perform(async {}, |_| {
-                    Message::OpenEntity("".to_string())
-                }));
 
                 Task::batch(task)
             }
@@ -280,38 +538,38 @@ impl Snapdash {
                     if let WindowKind::Entity { entity_id } = &kind {
                         entity.entity_id = entity_id.clone();
 
-                        // get initial state for widget
-                        if let Some(st) = self
-                            .entities
-                            .iter()
-                            .find(|st| st.entity_id == entity.entity_id)
-                        {
+                        if let Some(st) = self.entities_by_id.get(&entity.entity_id) {
                             entity.last = Some(st.clone());
                         }
+                        self.entity_windows.insert(entity_id.clone(), id);
                     }
-                    self.windows.insert(id, WindowState { kind, entity });
+                    self.windows.insert(
+                        id,
+                        WindowState {
+                            kind,
+                            entity,
+                            debug: WindowDebugState::default(),
+                        },
+                    );
+                    #[cfg(feature = "diagnostics")]
+                    if self.config.debug_overlay {
+                        self.seed_debug_window(id, Instant::now());
+                    }
                 } else {
                     self.set_status(
-                        "Recieved WindowActuallyOpened but pending_opens is empty",
+                        "Received WindowActuallyOpened but pending_opens is empty",
                         LogType::Warn,
                     );
                 }
                 Task::none()
             }
 
-            // Message::WindowOpened(id, kind) => {
-            //     let mut entity = EntityWindowState::default();
-
-            //     if let WindowKind::Entity { entity_id } = &kind {
-            //         entity.entity_id = entity_id.clone();
-            //     }
-
-            //     self.windows.insert(id, WindowState { kind, entity });
-            //     Task::none()
-            // }
-            //
             Message::WindowClosed(id) => {
-                self.windows.remove(&id);
+                if let Some(window) = self.windows.remove(&id) {
+                    if let WindowKind::Entity { entity_id } = window.kind {
+                        self.entity_windows.remove(&entity_id);
+                    }
+                }
 
                 if self.windows.is_empty() {
                     iced::exit()
@@ -319,11 +577,12 @@ impl Snapdash {
                     Task::none()
                 }
             }
+
             Message::HaUrlChanged(val) => {
                 self.config.ha_url = val;
                 Task::none()
             }
-            Message::HaTokenChanged(val) => Task::none(),
+            Message::HaTokenChanged(_val) => Task::none(),
 
             Message::SavePressed => {
                 self.set_status("Saving...", LogType::DoNotLog);
@@ -354,12 +613,6 @@ impl Snapdash {
                 Task::none()
             }
 
-            Message::OpenEntityPressed => {
-                // TODO
-                self.set_status("TODO: Open entity window", LogType::Warn);
-                Task::none()
-            }
-
             Message::OpenSettings => {
                 // if Settings window is opened, give focus
                 //
@@ -372,9 +625,10 @@ impl Snapdash {
                 self.pending_opens.push_back(WindowKind::Settings);
 
                 let settings = window::Settings {
-                    size: iced::Size::new(720.0, 650.0),
+                    size: iced::Size::new(820.0, 950.0),
                     resizable: false,
-                    decorations: true,
+                    decorations: false,
+                    transparent: true,
                     ..window::Settings::default()
                 };
 
@@ -386,6 +640,13 @@ impl Snapdash {
                 // vytvoř nové okno pro entitu
                 // let (id, cmd) = window::open(...);
                 // self.entity_windows.insert(id, EntityWindowState { ... });
+                //
+
+                let widgets: Vec<String> = if entity_id.is_empty() {
+                    self.config.widgets.clone()
+                } else {
+                    vec![entity_id]
+                };
 
                 let win_settings = window::Settings {
                     size: iced::Size::new(240.0, 160.0),
@@ -395,20 +656,9 @@ impl Snapdash {
                     ..Default::default()
                 };
 
-                // pokud už jsou pro všechny widgety okna otevřená, nedělej nic
-                let all_open = self
-                    .config
-                    .widgets
-                    .iter()
-                    .all(|w| self.is_entity_window_open(w));
-
-                if all_open {
-                    return Task::none();
-                }
-
                 let mut task = Vec::new();
 
-                for widget in self.config.widgets.iter().cloned() {
+                for widget in widgets {
                     if self.is_entity_window_open(&widget) {
                         continue;
                     }
@@ -429,13 +679,6 @@ impl Snapdash {
                 }
             }
 
-            // Message::CloseWindow(id) => {
-            //     self.entity_windows.remove(&id);
-            //     if self.settings_window == Some(id) {
-            //         self.settings_window = None;
-            //     }
-            //     window::close(id)
-            // }
             Message::ThemeSelected(t) => {
                 self.theme = t;
                 self.config.theme = t;
@@ -448,23 +691,9 @@ impl Snapdash {
             Message::SaveConfig => Task::none(),
 
             Message::ConnectHa => {
-                // spawn REST init + WS stream
-                // let url = self.config.ha_url.clone();
-                // let token = self.config.ha_token.clone();
-                // Task::batch(vec![
-                //     Task::perform(
-                //         crate::ha::rest::fetch_all_states(url.clone(), token.clone()),
-                //         Message::HaInitialStates,
-                //     ),
-                //     Task::perform(crate::ha::ws::run_event_loop(url, token), Message::HaEvent),
-                // ])
-                //
-                if self.ha_rx.is_some() {
-                    self.set_status("HA already connected", LogType::Warn);
-                    return Task::none();
-                }
-
                 if !self.config.ha_enabled() {
+                    self.ha_connected = false;
+                    self.ha_connection = None;
                     self.set_status("HA not enabled (missing token/URL)", LogType::Error);
                     return Task::none();
                 }
@@ -472,8 +701,11 @@ impl Snapdash {
                 let token = match crate::secrets::get_ha_token() {
                     Ok(t) => t,
                     Err(e) => {
-                        self.set_status(format!("Missing token in keychain: {e}"), LogType::Error);
+                        self.ha_connected = false;
+                        self.ha_connection = None;
+                        self.set_status(format!("Missing token in keychain {e}"), LogType::Error);
                         self.config.ha_token_present = false;
+
                         let cfg = self.config.clone();
                         return Task::perform(
                             async move {
@@ -484,130 +716,35 @@ impl Snapdash {
                     }
                 };
 
-                let url = self.config.ha_url.clone();
+                let next_connection = HaConnectionConfig {
+                    url: self.config.ha_url.clone(),
+                    token,
+                };
 
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HaEvent>();
-                self.ha_rx = Some(rx);
-
-                let rest = Task::perform(
-                    crate::ha::rest::fetch_all_states(url.clone(), token.clone()),
-                    Message::HaInitialStates,
-                );
-
-                tokio::spawn(async move {
-                    crate::ha::ws::run_forever(url, token, tx).await;
-                });
-
-                rest
-            }
-
-            Message::HaInitialStates(states) => {
-                self.entities.clear();
-                for st in states {
-                    for win in self.windows.values_mut() {
-                        if let WindowKind::Entity { .. } = &win.kind
-                            && win.entity.entity_id == st.entity_id
-                        {
-                            win.entity.last = Some(st.clone())
-                        }
-                    }
-                    self.entities.push(st)
+                if self.ha_connection.as_ref() != Some(&next_connection) {
+                    self.ha_connected = false;
+                    self.set_status("Connecting to HA ...", LogType::Info);
+                    self.ha_connection = Some(next_connection);
                 }
+
                 Task::none()
             }
 
             Message::HaEvent(ev) => {
-                match ev {
-                    HaEvent::Connected => {
-                        self.ha_connected = true;
-                        self.set_status("HA connected", LogType::Info);
-                    }
-
-                    HaEvent::Disconnected(_why) => {
-                        self.ha_connected = false;
-                        self.set_status(_why, LogType::Warn);
-                    }
-
-                    HaEvent::StateChanged { new_state } => {
-                        let id = new_state.entity_id.clone();
-                        let mut matched = 0usize;
-                        // let mut lines: Vec<String> = Vec::new();
-
-                        // lines.push(format!("ID {}  state: {:?}", id.clone(), new_state.clone()));
-
-                        for (win_id, win) in self.windows.iter_mut() {
-                            if let WindowKind::Entity { entity_id } = &win.kind {
-                                if entity_id == &id {
-                                    win.entity.last = Some(new_state.clone());
-                                    win.entity.pulse = 1.0;
-
-                                    // lines.push(format!("last value {:?}", win.entity.last));
-                                    matched += 1;
-                                }
-                            }
-                        }
-
-                        // if let Some((win_id, win)) = self.windows.iter_mut().find(|(_, w)| {
-                        //     matches!(&w.kind, WindowKind::Entity { .. })
-                        //         && &w.entity.entity_id == &id
-                        // }) {
-                        //     win.entity.last = Some(new_state.clone());
-                        //     win.entity.pulse = 1.0;
-                        // }
-                        //
-
-                        // if matched == 0 {
-                        //     for (win_id, win) in self.windows.iter_mut() {
-                        //         if let WindowKind::Entity { entity_id } = &win.kind {
-                        //             lines.push(format!(
-                        //                 "Open entity window: {:?} => {}",
-                        //                 win_id, entity_id
-                        //             ))
-                        //         }
-                        //     }
-                        // } else {
-                        //     self.set_status(format!("Match for {}", id));
-                        // }
-
-                        // for line in lines {
-                        //     self.set_status(line.clone());
-                        // }
-                    }
-                    _ => {}
-                }
+                self.handle_ha_event(ev);
                 Task::none()
             }
 
-            Message::ToggleField { window, field } => {
-                // if let Some(w) = self.windows.get_mut(&window) {
-                //     if !w.selected_fields.insert(field.clone()) {
-                //         w.selected_fields.remove(&field);
-                //     }
-                // }
+            Message::ToggleField {
+                window: _window,
+                field: _field,
+            } => {
+                // TODO:
                 Task::none()
             }
 
-            Message::Tick(_now) => {
-                let mut events = Vec::new();
-
-                if let Some(rx) = self.ha_rx.as_mut() {
-                    while let Ok(ev) = rx.try_recv() {
-                        events.push(ev);
-                    }
-                }
-
-                for ev in events {
-                    self.apply_ha_event(ev);
-                }
-
-                for win in self.windows.values_mut() {
-                    if let WindowKind::Entity { .. } = win.kind
-                        && win.entity.pulse > 0.0
-                    {
-                        win.entity.pulse = (win.entity.pulse - 0.08).max(0.0);
-                    }
-                }
-
+            Message::WindowRedraw(id, now) => {
+                self.handle_redraw_requested(id, now);
                 Task::none()
             }
         }
@@ -618,7 +755,8 @@ impl Snapdash {
             return iced::widget::text("Loading...").into();
         };
 
-        let inner = crate::ui::chrome::window_content(self, win);
+        let inner = crate::ui::chrome::window_content(self, win, id);
+        let inner = crate::ui::chrome::with_debug_overlay(self, inner, win);
 
         match win.kind {
             WindowKind::Entity { .. } => {

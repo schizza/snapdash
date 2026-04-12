@@ -129,8 +129,6 @@ fn hwnd_from_winit(
     use winit::raw_window_handle::HasWindowHandle;
     use winit::raw_window_handle::RawWindowHandle;
 
-    let handle = window.window_handle().ok()?; // Result<Option<_>>
-
     match handle.as_raw() {
         RawWindowHandle::Win32(h) => {
             // hwnd: NonZeroIsize
@@ -148,9 +146,9 @@ fn apply_windows_widget_hacks(
     settings: &window::Settings,
 ) {
     // Only transparent windows
-    if !(settings.transparent || !settings.decorations) {
-         return;
-     };
+    if !(settings.transparent && !settings.decorations) {
+        return;
+    };
 
     // Pro jistotu ještě po vytvoření vynutíme stejné vlastnosti.
     window.set_decorations(false);
@@ -183,14 +181,14 @@ fn apply_windows_widget_hacks(
             };
             let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
             let scale = window.scale_factor() as f32;
-            
+
             let logical_radius = 40.0; // např. 20.0
             let radius = (logical_radius * scale) as i32;
 
             let size = window.outer_size(); // PhysicalSize<u32>
             let w = size.width as i32;
             let h = size.height as i32;
-            
+
             let region: HRGN = CreateRoundRectRgn(0, 0, w, h, radius, radius);
 
             if !region.is_invalid() {

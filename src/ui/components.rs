@@ -1,6 +1,7 @@
 use iced::overlay::menu;
 use iced::widget::{
-    TextInput, button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
+    self, TextInput, button, checkbox, column, container, pick_list, row, scrollable, stack, text,
+    text_input,
 };
 use iced::{Background, Border, Element, Length};
 
@@ -10,6 +11,8 @@ use crate::theme::{Palette, ThemeKind, metric};
 pub fn card(content: Element<Message>, p: Palette) -> Element<Message> {
     container(content)
         .padding(metric::PAD)
+        .width(Length::Fill)
+        .height(Length::Fill)
         .style(move |_| container::Style {
             background: Some(Background::Color(p.card)),
             border: Border {
@@ -210,6 +213,7 @@ pub fn themepicker(
                 Status::Opened { is_hovered: _ } => {
                     border = p.accent;
                 }
+
                 Status::Active => {}
             }
 
@@ -322,26 +326,111 @@ pub fn status_dot(p: Palette, ok: bool) -> Element<'static, Message> {
     })
     .into()
 }
+
+pub fn active_sensor_section(app: &crate::app::Snapdash, p: Palette) -> Element<'_, Message> {
+    let active_sensors = app.active_settings_sensors.iter();
+
+    let mut col = column![];
+    for sensor in active_sensors {
+        let id = sensor.entity_id.clone();
+        let friendly_name = sensor.friendly_name.clone();
+        let id_for_msg = id.clone();
+        let row_el = row![
+            checkbox(true)
+                .label(friendly_name)
+                .on_toggle(move |_| Message::ToggleWidget(id_for_msg.clone()))
+                .text_size(14)
+                .style(move |_, _| iced::widget::checkbox::Style {
+                    background: iced::Background::Color(p.bg),
+                    text_color: Some(p.text_primary),
+                    icon_color: p.accent,
+                    border: Border {
+                        color: p.text_primary,
+                        width: 0.5,
+                        radius: 15.0.into()
+                    }
+                }),
+            text(format!(" ({})", sensor.entity_id))
+                .size(14)
+                .style(move |_: &iced::Theme| iced::widget::text::Style {
+                    color: Some(p.text_dim)
+                }),
+        ]
+        .padding(metric::PAD);
+        col = col.push(row_el);
+    }
+
+    let scroll = scrollable(col)
+        .height(Length::Fill)
+        .style(move |_: &iced::Theme, _| iced::widget::scrollable::Style {
+            container: iced::widget::container::Style {
+                background: Some(iced::Background::Color(p.card)),
+                border: Border {
+                    radius: 20.0.into(),
+                    width: 0.0,
+                    color: p.border,
+                },
+                text_color: Some(p.accent_dim),
+                ..Default::default()
+            },
+            vertical_rail: iced::widget::scrollable::Rail {
+                background: Some(iced::Background::Color(p.accent_tint)),
+                scroller: iced::widget::scrollable::Scroller {
+                    background: iced::Background::Color(p.accent),
+                    border: Border {
+                        color: p.accent_dim,
+                        width: 0.3,
+                        radius: 20.0.into(),
+                    },
+                },
+                border: Border {
+                    color: p.border,
+                    width: 0.3,
+                    radius: 20.0.into(),
+                },
+            },
+            horizontal_rail: iced::widget::scrollable::Rail {
+                background: Some(iced::Background::Color(p.accent_dim)),
+                scroller: iced::widget::scrollable::Scroller {
+                    background: iced::Background::Color(p.accent_dim),
+                    border: iced::Border::default(),
+                },
+                border: iced::Border::default(),
+            },
+            gap: None,
+            auto_scroll: iced::widget::scrollable::AutoScroll {
+                background: iced::Background::Color(p.accent_dim),
+                border: iced::Border::default(),
+                icon: p.bg,
+                shadow: iced::Shadow {
+                    ..Default::default()
+                },
+            },
+        });
+
+    scroll.into()
+}
+
 pub fn sensors_section(app: &crate::app::Snapdash, p: Palette) -> Element<'_, Message> {
     // Seznam všech entit
-    let entities = &app.entities;
     // Např. jen senzory:
-    let sensors = entities
+    // let sensors = entities
+    //     .iter()
+    //     .filter(|e| e.entity_id.starts_with("sensor."));
+
+    let query = app.entity_search_query.trim().to_lowercase();
+
+    let sensors = app
+        .settings_sensors
         .iter()
-        .filter(|e| e.entity_id.starts_with("sensor."));
+        .filter(|sensor| query.is_empty() || sensor.search_key.contains(&query));
 
     let mut col = column![];
 
-    for e in sensors {
-        let id = e.entity_id.clone();
-        let friendly: String = e
-            .attributes
-            .get("friendly_name")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()) // podle tvého typu Value, tady jen ilustrace
-            .unwrap_or_else(|| id.clone());
-
-        let selected = app.config.widgets.contains(&id);
+    for sensor in sensors {
+        let id = sensor.entity_id.clone();
+        let friendly = sensor.friendly_name.clone();
+        let selected = app.selected_widgets.contains(&id);
 
         let id_for_msg = id.clone();
 
@@ -357,70 +446,118 @@ pub fn sensors_section(app: &crate::app::Snapdash, p: Palette) -> Element<'_, Me
                     border: Border {
                         color: p.text_primary,
                         width: 0.5,
-                        radius: 15.0.into(),
+                        radius: 15.0.into()
                     }
                 }),
-            text(format!(" ({})", e.entity_id))
-                .size(12)
+            text(format!(" ({})", sensor.entity_id))
+                .size(14)
                 .style(move |_: &iced::Theme| iced::widget::text::Style {
                     color: Some(p.text_dim)
                 }),
         ]
-        .spacing(8);
-
+        .padding(8);
         col = col.push(row_el);
     }
 
-    let scroll =
-        scrollable(col)
-            .height(Length::Fixed(200.0))
-            .style(
-                move |theme: &iced::Theme, status| iced::widget::scrollable::Style {
-                    container: iced::widget::container::Style {
-                        background: Some(iced::Background::Color(p.card)),
-                        border: Border {
-                            radius: 20.0.into(),
-                            width: 0.0,
-                            color: p.border,
-                        },
-                        text_color: Some(p.accent_dim),
-                        ..Default::default()
-                    },
-                    vertical_rail: iced::widget::scrollable::Rail {
-                        background: Some(iced::Background::Color(p.accent_tint)),
-                        scroller: iced::widget::scrollable::Scroller {
-                            background: iced::Background::Color(p.accent),
-                            border: Border {
-                                color: p.accent_dim,
-                                width: 0.3,
-                                radius: 20.0.into(),
-                            },
-                        },
-                        border: Border {
-                            color: p.border,
-                            width: 0.3,
-                            radius: 20.0.into(),
-                        },
-                    },
-                    horizontal_rail: iced::widget::scrollable::Rail {
-                        background: Some(iced::Background::Color(p.accent_dim)),
-                        scroller: iced::widget::scrollable::Scroller {
-                            background: iced::Background::Color(p.accent_dim),
-                            border: iced::Border::default(),
-                        },
-                        border: iced::Border::default(),
-                    },
-                    gap: None,
-                    auto_scroll: iced::widget::scrollable::AutoScroll {
-                        background: iced::Background::Color(p.accent_dim),
-                        border: iced::Border::default(),
-                        icon: p.bg,
-                        shadow: iced::Shadow {
-                            ..Default::default()
-                        },
+    let scroll = scrollable(col)
+        .height(Length::Fill)
+        .style(move |_: &iced::Theme, _| iced::widget::scrollable::Style {
+            container: iced::widget::container::Style {
+                background: Some(iced::Background::Color(p.card)),
+                border: Border {
+                    radius: 20.0.into(),
+                    width: 0.0,
+                    color: p.border,
+                },
+                text_color: Some(p.accent_dim),
+                ..Default::default()
+            },
+            vertical_rail: iced::widget::scrollable::Rail {
+                background: Some(iced::Background::Color(p.accent_tint)),
+                scroller: iced::widget::scrollable::Scroller {
+                    background: iced::Background::Color(p.accent),
+                    border: Border {
+                        color: p.accent_dim,
+                        width: 0.3,
+                        radius: 20.0.into(),
                     },
                 },
-            );
+                border: Border {
+                    color: p.border,
+                    width: 0.3,
+                    radius: 20.0.into(),
+                },
+            },
+            horizontal_rail: iced::widget::scrollable::Rail {
+                background: Some(iced::Background::Color(p.accent_dim)),
+                scroller: iced::widget::scrollable::Scroller {
+                    background: iced::Background::Color(p.accent_dim),
+                    border: iced::Border::default(),
+                },
+                border: iced::Border::default(),
+            },
+            gap: None,
+            auto_scroll: iced::widget::scrollable::AutoScroll {
+                background: iced::Background::Color(p.accent_dim),
+                border: iced::Border::default(),
+                icon: p.bg,
+                shadow: iced::Shadow {
+                    ..Default::default()
+                },
+            },
+        });
 
-    card(scroll.into(), p)
+    scroll.into()
+}
+
+pub fn fieldset<'a>(
+    legend: &'a str,
+    content: Element<'a, Message>,
+    p: Palette,
+) -> Element<'a, Message> {
+    let legend_chip: Element<'a, Message> = container(text(legend).size(13).style(
+        move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(p.text_dim),
+        },
+    ))
+    .padding([0, 8])
+    .style(move |_: &iced::Theme| iced::widget::container::Style {
+        background: Some(Background::Color(p.card_2)),
+        ..Default::default()
+    })
+    .into();
+
+    let panel: Element<'a, Message> = container(content)
+        .width(Length::Fill)
+        .padding(
+            iced::Padding::default()
+                .top(12)
+                .right(12)
+                .bottom(12)
+                .left(12),
+        )
+        .style(move |_: &iced::Theme| iced::widget::container::Style {
+            background: None,
+            border: Border {
+                radius: 14.0.into(),
+                width: 1.0,
+                color: p.border,
+            },
+            ..Default::default()
+        })
+        .into();
+
+    let base: Element<'a, Message> = column![iced::widget::space().height(7), panel,]
+        .spacing(0)
+        .width(Length::Fill)
+        .into();
+
+    let legend_overlay: Element<'a, Message> =
+        container(row![iced::widget::space().width(14), legend_chip,])
+            .width(Length::Fill)
+            .align_left(Length::Fill)
+            .align_top(Length::Shrink)
+            .into();
+
+    stack![base, legend_overlay].width(Length::Fill).into()
 }

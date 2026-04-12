@@ -28,7 +28,7 @@ fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
     let label = if connected {
         "connected"
     } else {
-        "disconected "
+        "disconected"
     };
 
     row![

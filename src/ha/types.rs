@@ -24,3 +24,9 @@ pub enum HaEvent {
     StateChanged { new_state: EntityState },
     Other,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HaConnectionConfig {
+    pub url: String,
+    pub token: String,
+}
