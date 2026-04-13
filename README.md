@@ -1,21 +1,47 @@
+<div align="center">
+
 # SnapDash
 
-SnapDash is a Rust-powered cross-platform desktop widget for Home Assistant. It gives you a clean, always-visible snapshot of your sensors and entities, with real-time updates, customizable cards, and lightweight charts.
+**A pluggable desktop widget system - Home Assistant today, anything tomorrow.**
+[![CI](https://github.com/schizza/snapdash/actions/workflows/ci.yml/badge.svg)](https://github.com/schizza/snapdash/actions/workflows/ci.yml)
+  [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+  [![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
+  [![Platforms](https://img.shields.io/badge/platforms-macOS_|_Windows_|_Linux-lightgrey.svg)]()
+
+[Website](https://snapdash.schizza.cz) · [Releases](https://github.com/schizza/snapdash/releases) · [Issues](https://github.com/schizza/snapdash/issues) · [Roadmap](https://github.com/schizza/snapdash/projects)
+</div>
+
+---
+
+Snapdash gives you a clean, always-visible snapshot of live data
+— sensors, metrics, anything that streams.
+Built in **Rust** for stability, performance, and 24/7 reliability, it sits quietly
+on your desktop without leaks, lag, or surprises.
+
+  Today it speaks **Home Assistant**. Tomorrow, anything you can wire up via plugins.
 
 Built with **Rust** for stability, performance, and long-running reliability —
 SnapDash is designed to run quietly in the background without leaks, lag, or surprises.
 
+🚧 **Status: Early development / MVP** — first public release, expect rough edges.
+
+<-!-- TODO: add screenshots/snapdash-settings.png and snapdash-widget.png -->
+
+| Widget | Settings |
+|:---:|:---:|
+| _coming soon_ | _coming soon_ |
+
 ## Features
 
-- Real-time updates via Home Assistant WebSocket API
-- Fully customizable cards and layouts
-  - in progress
-- Sensor history and lightweight charts
-  - in progress
-- Cross-platform: macOS, Windows, Linux
-- Frameless widget window
-- Secure token storage (OS keychain)
-- Low resource usage, safe for 24/7 operation
+- **Real-time** updates via Home Assistant WebSocket API
+- **Frameless widgets** - pin individual sensors as floating macOS-style cards
+- **Native look** - Mac Light / Mac Dark themes, smooth pulse animations on state change
+- **Secure token storage** - credentials lives in OS keychain (macOD Keychain / Windows Credential Manager / Linux Secret Service), never in plain text
+- **Cross-platform** - macOS, Windows, Linux
+- **Lightweight** - low CPU / memory footprint, designed to run 24/7 in background
+- **Pluggable (planned)** - Home Assistant is the first integration; plugin API for arbitrary data sources is on the roadmap
+- **Fully customizable cards and layouts** - in progress
+- **Sensor history and lightweight charts** - in progress
 
 ## Why Rust?
 
@@ -23,125 +49,117 @@ Because SnapDash is meant to be boring in the best possible way.
 
 Rust lets us build a widget that doesn’t slowly eat memory, doesn’t spike the CPU, and doesn’t need babysitting. You start it, pin it to your desktop, and it just keeps doing its job.
 
-## Status
+## Installation
 
-🚧 Early development / MVP stage
+### Pre-built binaries
+
+Grab the latest release for your platform from the [Releases page](https://github.com/schizza/snapdash/releases):
+
+- **macOS**: `.dmg` (Apple Silicon)
+- **Windows**: `.exe` portable / `.msi` installer
+- **Linux**: `.tar.gz` portable / `.AppImage`
+
+⚠️ macOS binaries are **not yet code-signed**. macOS will warn about an "unidentified
+  developer" — open it via `Right-click → Open` once.
+
+### Build from source
+
+Requires **Rust 1.85** (2024 edition)
+
+```bash
+git clone https://github/schizza/snapdash.git
+cd snapdash
+cargo build --release
+
+# Run directly
+cargo run --release
+```
+
+## Quick start
+
+1. Launch Snapdash - the **Settings** window opens automatically on first run.
+2. Enter your Home Assistant URL (e. g. `http://localhost:8123`).
+3. Paste your **Long-Lived Access Token** (see below).
+4. Hit **Save** - Snapdash connects and lists your sensors.
+5. Tick any sensor -> a floating widget appears for it.
+6. Drag widget anywhere on screen. They remember their position.
+
+## Getting a Home Assistant Long-Lived Token
+
+1. Open your Home Assistant UI in a browser.
+2. Click your **user profile** (avatar in bottom-left)
+3. Go to **Security -> Long-Lived Access Tokens**
+4. Click **Create token**, name it (e.g. `Snapdash`), confirm
+5. Copy the token immediately - Home Assistant only shows it once.
+6. Paste it into Snapdash Settings , confirm
+7. Copy the token immediately - Home Assistant only shows it once.
+8. Paste it into Snapdash Settings -> **Home Assistant token** field.
+
+After saving, the token is moved to your OS keychain. The `config.json` file never contains the token.
+
+If the token is compromised: delete it in HA, generate a new one, paste it into Snapdash Settings (the `🗑` button next to the token field also clears the keychain entry).
+
+### Configuration
+
+Snapdash uses a simple JSON config in your user profile.
+If the config is corrupted, Snapdash falls back to defaults and writes a fresh file on next save.
+
+### File locations
+
+| OS | Config | Log |
+| --- | --- | --- |
+| **macOS** | `~/Library/Application Support/dev.snapdash.Snapdash/config.json` | `~/Library/Application Support/dev.snapdash.Snapdash/debug.log` |
+| **Windows** | `%APPDATA%\dev.snapdash.Snapdash\config.json` | `%APPDATA%\dev.snapdash.Snapdash\debug.log` |
+| **Linux** | `~/.config/snapdash/config.json` | `~/.local/share/snapdash/debug.log` |
+
+## Troubleshooting
+
+**Settings window doesn't open**
+First run with no config auto-opens Settings. If it stays closed, check the log file.
+
+**`Invalid JSON ... using defalut config` in log**
+The config file got corrupted. Delete it or fix the JSON manually, then reconfigure via Settings.
+
+**No widget windows appear despite saved entities**
+Check the log for HA WebSocket errors - token expired, URL unreachable, network blocked.
+Open Settings, hit **Save** again to force a reconnect.
+
+**Token issues**
+On macOS/Windows the token only lives in the keychain. To reset: in Settings, click `🗑` to clear, then paste a fresh token and save.
 
 ## Roadmap
 
-- [X] Widget window + basic card layout
-- [X] Home Assistant authentication & entity picker
-- [X] Real-time updates (WebSocket)
-- [ ] Multiple cards support
-- [ ] Local history & 24h charts
-- [ ] Tray menu & autostart
+- [X] Frameless widget windows + macOS-style theming
+- [X] Home Assistant WebSocket integration with reconnect
+- [X] Secure token storage in OS keychain
+- [X] Real-time state updates with pulse animations
+- [X] Multi-widget configuration via Settings
+- [X] Local history & 24h sparkline charts
+- [ ] System tray menu & autostart
+- [ ] Plugin API for non-HA data sources
+- [ ] Linux-specific window hacks (XShape rounded corners)
+- [ ] Code-signed releases (macOS notarization, Windows signing)
+- [ ] Auto-update mechanism
+
+See the [issue tracker](https://github.com/schizza/snapdash/issues) and [project board](https://github.com/schizza/snapdash/projects) for current work.
 
 ## Tech Stack
 
-- Rust (core, Home Assistant client, data handling)
-- Iced with custom hacks
+- **[Rust](https://www.rust-lang.org/)** (2024 edition) - core language
+- **[Iced](https://github.com/iced-rs/iced)** (forked) - GPU-accelerated GUI via wgpu
+- **[Tokio](https://github.com/tokio-rs/tokio)** - async runtime
+- **[tokio-tungstenite](https://github.com/snapview/tokio-tungstenite)** - WebSocket client
+- **[reqwest](https://github.com/seanmonstar/reqwest)** - HTTP client (initial state fetch)
+- **[keyring](https://github.com/hwchen/keyring-rs)** - cross-platform OS credential storage
 
-## Getting your Home Assistant Long-Lived Access Token
+## Contributing
 
-SnapDash uses a **long-lived access token** to talk to your Home Assistant instance.
-You only need to create it once and paste it into the Settings window.
+Contributions welcome! Pleas read [CONTRIBUTING.md](CONTRIBUTING.MD) (TODO) and check open [issues](https://github.com/schizza/snapdash/issues) for places to start.
 
-1. Open your Home Assistant UI in a browser.
-2. Click your **user profile**:
-   - bottom-left corner (your username / avatar),
-   - or go to **Settings → People → [Your user]** and open the profile.
-3. Scroll down to the section **Long-Lived Access Tokens**.
-4. Click **Create Token**.
-5. Enter any name, e.g. `SnapDash`, and confirm.
-6. Home Assistant will show you the token **once**:
-   - copy it immediately,
-   - paste it into the **Home Assistant token** field in SnapDash Settings.
-7. After saving:
-   - SnapDash stores the token in the OS keychain (not in `config.json`),
-   - you can safely close the window; you don’t need to see the token again.
-
-If you lose the token or suspect it was compromised:
-
-- go back to **Long-Lived Access Tokens** in your HA profile,
-- **delete** the old token,
-- create a new one and update it in SnapDash Settings.
-
-## Configuration
-
-SnapDash using simple  JSON config that is stored in your user profile.
-If configiguration is broken, application will start with defauls and write new config file.
-
-### Where is `config.json`?
-
-**macOS**
-
-```text
-  ~/Library/Application Support/dev.snapdash.Snapdash/config.json
-```
-
-**Windows**
-
-```text
-%APPDATA%\dev.snapdash.Snapdash\config.json
-
-or
-
-C:\Users\<username>\AppData\Roaming\dev.snapdash.Snapdash\config.json
-```
-
-**Linux**
-
-```text
-~/.config/snapdash/config.json
-```
-
-### Where is my log file?
-
-**macOS**
-
-```text
-  ~/Library/Application Support/dev.snapdash.Snapdash/debug.log
-```
-
-**Windows**
-
-```text
-%APPDATA%\dev.snapdash.Snapdash\debug.log
-
-or:
-
-C:\Users\<username>\AppData\Roaming\dev.snapdash.Snapdash\debug.log
-```
-
-**Linux**
-
-```text
-~/.config/snapdash/debug.log
-
-or
-
-~/.local/share/snapdash/debug.log
-```
-
-## Where to look when things go wrong
-
-**Config issues**
-
-- Check `config.json` in the paths listed above.
-- If SnapDash reports “Invalid JSON… Using default config”, the file is corrupted;
-  delete it or fix the JSON syntax and reconfigure via Settings.
-
-- **Token / authentication**
-  - On macOS/Windows the token is stored only in the OS keychain; if connection fails:
-    - remove and re-save the token in Settings,
-    - or clear the `snapdash` / `Snapdash` entry in the Keychain / Credential Manager.
-
-- **No widget windows visible**
-  - On the very first run without a config:
-    - SnapDash loads a default config and should automatically open the Settings window.
-  - If you have an entity in `widgets` but no window appears:
-    - check the log and any errors from the HA WebSocket.
+Bug reports and feature requests via the [issue tracker](https://github.com/schizza/snapdash/issues/new/choose).
 
 ## License
 
-MIT
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
+See [NOTICE](NOTICE) for third-party attribution.

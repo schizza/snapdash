@@ -2,6 +2,27 @@
 name = "snapdash"
 version = "0.0.1"
 edition = "2024"
+authors = ["Lukáš Svoboda <opensource@schizza.cz"]
+license = "Apache-2.0"
+description = "A pluggable desktop widget system - Home Assistant today, anything tomorrow."
+repository = "https://github.com/schizza/snapdash"
+homepage = "https://snapdash.schizza.cz"
+documentation = "https://github.com/schizza/snapdash#readme"
+readme = "README.md"
+keywords = ["widget", "dashboard", "home-assistant", "desktop", "gui"]
+categories = ["gui", "visualisation", "rendering"]
+rust-version = "1.94"
+
+exclude = [
+  "/.github/",
+  "/.vscode/",
+  "/.zed/",
+  "/dist/",
+  "/assets/screenshots/",
+  "*.png",
+  "*.gif",
+  "mac_build.sh",
+]
 
 [features]
 default = ["diagnostics"]
