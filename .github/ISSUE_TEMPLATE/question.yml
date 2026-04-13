@@ -1,0 +1,24 @@
+
+name: ❓ Question
+  description: Ask how to do something. (Usually Discussions is a better place!)
+  labels: ["needs-info"]
+  body:
+    - type: markdown
+      attributes:
+        value: |
+          💡 **For most questions, please use [Discussions](https://github.com/schizza/snapdash/discussions) instead.**
+          Use Issues only if your question might turn out to be a bug or a missing feature.
+
+    - type: textarea
+      id: question
+      attributes:
+        label: Your question
+        placeholder: "I'm trying to ... but I can't figure out ..."
+      validations:
+        required: true
+
+    - type: textarea
+      id: context
+      attributes:
+        label: Context
+        description: What have you tried? What docs did you consult?

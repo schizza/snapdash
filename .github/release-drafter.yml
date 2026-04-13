@@ -1,0 +1,94 @@
+name-template: 'v$RESOLVED_VERSION'
+  tag-template: 'v$RESOLVED_VERSION'
+
+  filter-by-commitish: false
+
+  version-resolver:
+    major:
+      labels: ['breaking-change', 'semver:major']
+    minor:
+      labels: ['feat', 'feature', 'enhancement', 'semver:minor']
+    patch:
+      labels: ['fix', 'bug', 'chore', 'refactor', 'semver:patch']
+    default: patch
+
+  categories:
+    - title: '💥 Breaking changes'
+      labels: ['breaking-change', 'semver:major']
+    - title: '✨ New features'
+      labels: ['feat', 'feature', 'enhancement']
+    - title: '🐛 Bug fixes'
+      labels: ['fix', 'bug']
+    - title: '⚡ Performance'
+      labels: ['perf']
+    - title: '🎨 UI changes'
+      labels: ['ui']
+    - title: '🧹 Refactoring / maintenance'
+      labels: ['refactor', 'chore', 'maintenance']
+    - title: '📝 Documentation'
+      labels: ['docs', 'documentation']
+    - title: '🧪 Tests'
+      labels: ['test', 'tests']
+    - title: '📦 Packaging & Release'
+      labels: ['packaging']
+
+  autolabeler:
+    - label: "feat"
+      branch:
+        - "/^feat\\//"
+        - "/^feature\\//"
+      title:
+        - "/^feat(\\(.+\\))?:/i"
+    - label: "fix"
+      branch: ["/^fix\\//", "/^bug\\//"]
+      title: ["/^fix(\\(.+\\))?:/i"]
+    - label: "chore"
+      branch: ["/^chore\\//"]
+      title: ["/^chore(\\(.+\\))?:/i"]
+    - label: "docs"
+      branch: ["/^docs\\//"]
+      title: ["/^docs(\\(.+\\))?:/i"]
+    - label: "refactor"
+      branch: ["/^refactor\\//"]
+      title: ["/^refactor(\\(.+\\))?:/i"]
+    - label: "perf"
+      branch: ["/^perf\\//"]
+      title: ["/^perf(\\(.+\\))?:/i"]
+    - label: "test"
+      branch: ["/^test\\//"]
+      title: ["/^test(\\(.+\\))?:/i"]
+    - label: "breaking-change"
+      title: ["/!:/"]
+
+  exclude-labels:
+    - 'skip-changelog'
+
+  change-template: |
+    - $TITLE (#$NUMBER) @$AUTHOR
+      $BODY
+
+  change-title-escapes: '\<*_&'
+
+  replacers:
+    - search: "/^(feat|fix|chore|docs|refactor|perf|test|bug|enhancement|enhance)(\\(.+
+  \\))?:\\s*/i"
+      replace: ""
+
+  template: |
+    ## What's changed in Snapdash v$RESOLVED_VERSION
+
+    $CHANGES
+
+    ---
+
+    **Full Changelog**:
+  https://github.com/schizza/snapdash/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+
+    ### 📥 Download
+
+    - **macOS** (Apple Silicon): `snapdash-$RESOLVED_VERSION-macos-aarch64.dmg`
+    - **macOS** (Intel): `snapdash-$RESOLVED_VERSION-macos-x86_64.dmg`
+    - **Windows**: `snapdash-$RESOLVED_VERSION-windows-x86_64.exe`
+    - **Linux**: `snapdash-$RESOLVED_VERSION-linux-x86_64.tar.gz`
+
+    See [Installation guide](https://github.com/schizza/snapdash#installation) for details.
