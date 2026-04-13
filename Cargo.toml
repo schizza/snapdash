@@ -62,13 +62,20 @@ url = "2.5.7"
 objc2-quartz-core = "0.3.2"
 
 [patch.crates-io]
-iced = { path = "vendor/iced" }
-iced_winit = { path = "vendor/iced/winit" }
-iced_runtime = { path = "vendor/iced/runtime" }
-iced_program = { path = "vendor/iced/program" }
-iced_renderer = { path = "vendor/iced/renderer" }
-iced_widget = { path = "vendor/iced/widget" }
-iced_core = { path = "vendor/iced/core" }
+iced = { git = "https://github.com/schizza/iced.git", branch = "snapdash-patches" }
+iced_winit = { git = "https://github.com/schizza/iced.git", branch = "snapdash-patches" }
+iced_runtime = { git = "https://github.com/schizza/iced.git", branch = "snapdash-patches" }
+iced_program = { git = "https://github.com/schizza/iced.git", branch = "snapdash-patches" }
+iced_renderer = { git = "https://github.com/schizza/iced.git", branch = "snapdash-patches" }
+iced_widget = { git = "https://github.com/schizza/iced.git", branch = "snapdash-patches" }
+iced_core = { git = "https://github.com/schizza/iced.git", branch = "snapdash-patches" }
+
+# iced_winit = { path = "vendor/iced/winit" }
+# iced_runtime = { path = "vendor/iced/runtime" }
+# iced_program = { path = "vendor/iced/program" }
+# iced_renderer = { path = "vendor/iced/renderer" }
+# iced_widget = { path = "vendor/iced/widget" }
+# iced_core = { path = "vendor/iced/core" }
 
 [profile.release]
 opt-level = "z"
