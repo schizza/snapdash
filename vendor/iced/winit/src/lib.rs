@@ -71,7 +71,7 @@ fn apply_macos_widget_hacks(
 ) {
     #[cfg(target_os = "macos")]
     // Apply only to widget windows
-    if !(settings.transparent && !settings.decorations) {
+    if !settings.transparent || settings.decorations {
         return;
     }
 
@@ -79,9 +79,8 @@ fn apply_macos_widget_hacks(
     use objc2_app_kit::{NSColor, NSView};
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-    let handle = match window.window_handle() {
-        Ok(h) => h,
-        Err(_) => return,
+    let Ok(handle) = window.window_handle() else {
+        return;
     };
 
     // AppKit window handler
@@ -145,8 +144,8 @@ fn apply_windows_widget_hacks(
     window: &winit::window::Window,
     settings: &window::Settings,
 ) {
-    // Only transparent windows
-    if !(settings.transparent && !settings.decorations) {
+    // Only transparent windows with no decorations
+    if !settings.transparent || settings.decorations {
         return;
     };
 
@@ -182,7 +181,9 @@ fn apply_windows_widget_hacks(
             let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
             let scale = window.scale_factor() as f32;
 
-            let logical_radius = 40.0; // např. 20.0
+            // ve windows se radius počítá jinak než na MacOs, proto je
+            // zde radius 40
+            let logical_radius = 40.0;
             let radius = (logical_radius * scale) as i32;
 
             let size = window.outer_size(); // PhysicalSize<u32>

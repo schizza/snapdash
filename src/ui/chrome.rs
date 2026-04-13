@@ -1,15 +1,15 @@
+use iced::widget::{MouseArea, mouse_area};
 #[cfg(feature = "diagnostics")]
 use iced::widget::{column, container, text};
-use iced::widget::{MouseArea, mouse_area};
 use iced::window;
+use iced::{Alignment, Element, Length};
 #[cfg(feature = "diagnostics")]
 use iced::{Background, Border};
-use iced::{Alignment, Element, Length};
 
 use crate::app::{Message, WindowKind, WindowState};
 use crate::ui::theme::{UiTheme, icon_button, icon_text};
 
-/// Vrátí obsah okna podle typu (`Settings` / `Entity`)
+/// Returns window content based on its kind (`Settings` / `Entity`).
 pub fn window_content<'a>(
     app: &'a crate::app::Snapdash,
     win: &'a WindowState,
@@ -23,7 +23,7 @@ pub fn window_content<'a>(
     }
 }
 
-/// Přidá do rohu okna "gear" overlay, který otevírá nastavení.
+/// Adds a "gear" overlay in the window corner that opens settings.
 pub fn with_gear_overlay<'a>(
     app: &crate::app::Snapdash,
     inner: Element<'a, Message>,
@@ -138,7 +138,7 @@ pub fn with_debug_overlay<'a>(
     inner
 }
 
-/// Obalí obsah do `MouseArea` s hover efektem a případným dragem.
+/// Wraps `MouseArea` with hover effect and added drag.
 pub fn with_mouse_area<'a>(
     content: Element<'a, Message>,
     id: window::Id,

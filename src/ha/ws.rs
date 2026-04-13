@@ -48,7 +48,7 @@ fn ws_url_from_http(ha_url: &str) -> String {
     } else if let Some(rest) = base.strip_prefix("http://") {
         format!("ws://{rest}/api/websocket")
     } else {
-        // fallback: předpokládáme https
+        // fallback: assume https
         format!("wss://{base}/api/websocket")
     }
 }

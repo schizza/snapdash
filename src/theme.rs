@@ -26,7 +26,7 @@ pub struct Palette {
 
     pub text_primary: iced::Color,   // main headings
     pub text_secondary: iced::Color, // subhedings, labels
-    pub text_body: iced::Color,      // normal texr
+    pub text_body: iced::Color,      // normal text
     pub text_dim: iced::Color,       // placeholder, hint
     pub text_disabled: iced::Color,
 

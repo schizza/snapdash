@@ -1,6 +1,6 @@
 use iced::overlay::menu;
 use iced::widget::{
-    self, TextInput, button, checkbox, column, container, pick_list, row, scrollable, stack, text,
+    TextInput, button, checkbox, column, container, pick_list, row, scrollable, stack, text,
     text_input,
 };
 use iced::{Background, Border, Element, Length};
@@ -41,7 +41,9 @@ pub fn subcard(content: Element<Message>, p: Palette) -> Element<Message> {
         .into()
 }
 
-// „Pill“ button (mac-ish), wrapper aroud button
+/// Pill-shaped button (mac-ish), wrapper aroud `button`
+/// `text-input` wrapper styled as a mac input
+/// wrapper arroud `pick_list`
 pub fn pill_button(
     label: &'static str,
     p: Palette,
@@ -251,6 +253,7 @@ pub fn section(label: &'static str, p: Palette) -> text::Text<'static> {
     text(label).color(p.text_secondary).size(16)
 }
 
+// Left here intentionaly, usage in future?
 pub fn label<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
     text(label.into()).color(p.text_secondary).size(14)
 }

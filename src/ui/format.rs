@@ -5,7 +5,7 @@ use serde_json::Value;
 pub struct FormattedValue {
     pub title: Option<String>,  // friendly name
     pub main: String,           // big number
-    pub detail: Option<String>, // samll line main
+    pub detail: Option<String>, // small line main
 }
 
 fn attr_str(st: &EntityState, key: &str) -> Option<String> {
@@ -43,7 +43,7 @@ fn on_off(state: &str) -> Option<&'static str> {
 
 fn human_number(n: f64) -> String {
     if (n.fract()).abs() < 0.0001 {
-        format!("{:0}", n)
+        format!("{:.0}", n)
     } else if (n * 10.0).fract().abs() < 0.0001 {
         format!("{:.1}", n)
     } else {

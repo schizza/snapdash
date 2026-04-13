@@ -4,7 +4,7 @@ use crate::logger::LogType;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
-use iced::{Element, Task};
+use iced::{Element, Task, event};
 use iced::{Subscription, window};
 
 use crate::config::Config;
@@ -27,7 +27,7 @@ pub struct WindowState {
 pub struct EntityWindowState {
     pub entity_id: String,
     pub last: Option<EntityState>,
-    pub pulse: f32, // TODO: Replace with Animation/spring. Now just easy "animation paramter" (0..1), později nahradit Animation/spring
+    pub pulse: f32, // TODO: Replace with Animation/spring. Currently just easy "animation paramter" (0..1), později nahradit Animation/spring
     pub hovered: bool,
 }
 
@@ -70,6 +70,12 @@ pub struct SettingsSensor {
     pub entity_id: String,
     pub friendly_name: String,
     pub search_key: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FocusDirection {
+    Next,
+    Previous,
 }
 
 #[derive(Debug)]
@@ -124,9 +130,9 @@ pub enum Message {
     HaTokenDelete,
 
     // UI events
-    ToggleField {
-        window: window::Id,
-        field: String,
+    FocusMove {
+        window_id: window::Id,
+        direction: FocusDirection,
     },
     SavePressed,
     Saved,
@@ -257,9 +263,32 @@ impl Snapdash {
             Subscription::none()
         };
 
+        let keyboard_events = iced::event::listen_raw(|event, _status, id| {
+            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+                modifiers,
+                ..
+            }) = event
+            else {
+                return None;
+            };
+
+            let direction = if modifiers.shift() {
+                FocusDirection::Previous
+            } else {
+                FocusDirection::Next
+            };
+
+            Some(Message::FocusMove {
+                window_id: id,
+                direction,
+            })
+        });
+
         Subscription::batch([
             window::close_events().map(Message::WindowClosed),
             redraw_events,
+            keyboard_events,
             ha,
         ])
     }
@@ -735,12 +764,23 @@ impl Snapdash {
                 Task::none()
             }
 
-            Message::ToggleField {
-                window: _window,
-                field: _field,
+            Message::FocusMove {
+                window_id,
+                direction,
             } => {
-                // TODO:
-                Task::none()
+                let is_sesttings = self
+                    .windows
+                    .get(&window_id)
+                    .is_some_and(|w| matches!(w.kind, WindowKind::Settings));
+
+                if !is_sesttings {
+                    return Task::none();
+                }
+
+                match direction {
+                    FocusDirection::Next => iced::widget::operation::focus_next(),
+                    FocusDirection::Previous => iced::widget::operation::focus_previous(),
+                }
             }
 
             Message::WindowRedraw(id, now) => {

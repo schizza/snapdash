@@ -7,7 +7,7 @@ use crate::theme::Palette;
 use crate::ui::format::format_entity_value;
 
 fn pretty_name(entity_id: &str) -> &str {
-    entity_id.split(".").nth(1).unwrap_or(entity_id)
+    entity_id.split('.').nth(1).unwrap_or(entity_id)
 }
 
 fn format_main_value(
