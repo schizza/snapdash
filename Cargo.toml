@@ -62,13 +62,13 @@ url = "2.5.7"
 objc2-quartz-core = "0.3.2"
 
 [patch.crates-io]
-iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p1" }
-iced_winit = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p1" }
-iced_runtime = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p1" }
-iced_program = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p1" }
-iced_renderer = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p1" }
-iced_widget = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p1" }
-iced_core = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p1" }
+iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p2" }
+iced_winit = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p2" }
+iced_runtime = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p2" }
+iced_program = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p2" }
+iced_renderer = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p2" }
+iced_widget = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p2" }
+iced_core = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p2" }
 
 # iced_winit = { path = "vendor/iced/winit" }
 # iced_runtime = { path = "vendor/iced/runtime" }
