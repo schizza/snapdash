@@ -1,55 +1,52 @@
 name: ✨ Feature request
-  description: Suggest a new feature or enhancement.
-  labels: ["feat"]
-  body:
-    - type: markdown
-      attributes:
-        value: |
-          Got an idea to make Snapdash better? 🎉
-          Please describe the **problem** first, then the **solution** you have in mind.
+description: Suggest a new feature or enhancement.
+labels: ["feat"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got an idea to make Snapdash better? 🎉
+        Please describe the **problem** first, then the **solution** you have in mind.
 
-    - type: textarea
-      id: problem
-      attributes:
-        label: What problem does this solve?
-        description: What's missing or frustrating today?
-        placeholder: "I can't currently ..."
-      validations:
-        required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What's missing or frustrating today?
+      placeholder: "I can't currently ..."
+    validations:
+      required: true
 
-    - type: textarea
-      id: proposal
-      attributes:
-        label: Proposed solution
-        description: Ideal behavior, UI mockup, API sketch — anything that helps
-  explain.
-      validations:
-        required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Ideal behavior, UI mockup, API sketch — anything that helps explain.
+    validations:
+      required: true
 
-    - type: textarea
-      id: alternatives
-      attributes:
-        label: Alternatives considered
-        description: Any other approaches you considered and why they wouldn't work as
-  well.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you considered and why they wouldn't work as well.
 
-    - type: dropdown
-      id: area
-      attributes:
-        label: Which area does this affect?
-        options:
-          - UI / widgets
-          - Home Assistant integration
-          - Plugin system (future)
-          - Configuration / settings
-          - Packaging / release
-          - Other / cross-cutting
-      validations:
-        required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area does this affect?
+      options:
+        - UI / widgets
+        - Home Assistant integration
+        - Plugin system (future)
+        - Configuration / settings
+        - Packaging / release
+        - Other / cross-cutting
+    validations:
+      required: true
 
-    - type: textarea
-      id: extra
-      attributes:
-        label: Additional context
-        description: Related issues, screenshots, references to similar tools, etc.
-
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Related issues, screenshots, references to similar tools, etc.
