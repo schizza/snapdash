@@ -85,9 +85,9 @@ template: |
 
   ### 📥 Download
 
-  - **macOS** (Apple Silicon): `snapdash-$RESOLVED_VERSION-macos-aarch64.dmg`
-  - **macOS** (Intel): `snapdash-$RESOLVED_VERSION-macos-x86_64.dmg`
-  - **Windows**: `snapdash-$RESOLVED_VERSION-windows-x86_64.exe`
-  - **Linux**: `snapdash-$RESOLVED_VERSION-linux-x86_64.tar.gz`
+  - **macOS** (Apple Silicon): `snapdash-v$RESOLVED_VERSION-macos-aarch64.tar.gz`
+  - **macOS** (Intel): `snapdash-v$RESOLVED_VERSION-macos-x86_64.tar.gz`
+  - **Windows**: `snapdash-v$RESOLVED_VERSION-windows-x86_64.zip`
+  - **Linux**: `snapdash-v$RESOLVED_VERSION-linux-x86_64.tar.gz`
 
   See [Installation guide](https://github.com/schizza/snapdash#installation) for details.
