@@ -15,15 +15,6 @@ struct Incoming {
 
     #[serde(default)]
     event: Option<EventPayload>,
-
-    #[serde(default)]
-    success: Option<bool>,
-
-    #[serde(default)]
-    result: Option<serde_json::Value>,
-
-    #[serde(default)]
-    message: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -148,19 +139,14 @@ pub fn connect(config: &HaConnectionConfig) -> iced::futures::stream::BoxStream<
                 let Ok(msg) = msg else { continue };
                 let Ok(text) = msg.to_text() else { continue };
 
-                if let Ok(parsed) = serde_json::from_str::<Incoming>(text) {
-                    if parsed.r#type == "event" {
-                        if let Some(ev) = parsed.event {
-                            if ev.event_type == "state_changed" {
-                                if let Some(data) = ev.data {
-                                    if let Some(new_state) = data.new_state {
-                                        let _ =
-                                            output.send(HaEvent::StateChanged { new_state }).await;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                if let Ok(parsed) = serde_json::from_str::<Incoming>(text)
+                    && parsed.r#type == "event"
+                    && let Some(ev) = parsed.event
+                    && ev.event_type == "state_changed"
+                    && let Some(data) = ev.data
+                    && let Some(new_state) = data.new_state
+                {
+                    let _ = output.send(HaEvent::StateChanged { new_state }).await;
                 }
             }
 

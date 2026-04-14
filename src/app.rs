@@ -4,7 +4,7 @@ use crate::logger::LogType;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
-use iced::{Element, Task, event};
+use iced::{Element, Task};
 use iced::{Subscription, window};
 
 use crate::config::Config;
@@ -126,7 +126,6 @@ pub enum Message {
     ConnectHa,
     HaEvent(HaEvent),
     HaUrlChanged(String),
-    HaTokenChanged(String),
     HaTokenDelete,
 
     // UI events
@@ -137,7 +136,6 @@ pub enum Message {
     SavePressed,
     Saved,
     HaTokenDraftChanged(String),
-    ClearStatus,
     WindowRedraw(window::Id, Instant),
     ConfigLoad(Result<Config, String>),
     StartDrag(window::Id),
@@ -402,7 +400,6 @@ impl Snapdash {
             HaEvent::StateChanged { new_state } => {
                 self.apply_entity_state(new_state);
             }
-            HaEvent::Other => {}
         }
     }
 
@@ -594,10 +591,10 @@ impl Snapdash {
             }
 
             Message::WindowClosed(id) => {
-                if let Some(window) = self.windows.remove(&id) {
-                    if let WindowKind::Entity { entity_id } = window.kind {
-                        self.entity_windows.remove(&entity_id);
-                    }
+                if let Some(window) = self.windows.remove(&id)
+                    && let WindowKind::Entity { entity_id } = window.kind
+                {
+                    self.entity_windows.remove(&entity_id);
                 }
 
                 if self.windows.is_empty() {
@@ -611,12 +608,11 @@ impl Snapdash {
                 self.config.ha_url = val;
                 Task::none()
             }
-            Message::HaTokenChanged(_val) => Task::none(),
 
             Message::SavePressed => {
                 self.set_status("Saving...", LogType::DoNotLog);
                 if !self.ha_token_draft.trim().is_empty() {
-                    match crate::secrets::set_ha_token(&self.ha_token_draft.trim()) {
+                    match crate::secrets::set_ha_token(self.ha_token_draft.trim()) {
                         Ok(()) => {
                             self.config.ha_token_present = true;
                             self.ha_token_draft.clear();
@@ -635,11 +631,6 @@ impl Snapdash {
             Message::Saved => {
                 self.set_status("Saved", LogType::DoNotLog);
                 Task::perform(async {}, |_| Message::ConnectHa)
-            }
-
-            Message::ClearStatus => {
-                // self.status.clear();
-                Task::none()
             }
 
             Message::OpenSettings => {
@@ -662,7 +653,7 @@ impl Snapdash {
                 };
 
                 let (_id, task_id) = window::open(settings);
-                task_id.map(|actual_id| Message::WindowActuallyOpened(actual_id))
+                task_id.map(Message::WindowActuallyOpened)
             }
 
             Message::OpenEntity(entity_id) => {
@@ -696,9 +687,7 @@ impl Snapdash {
                         .push_back(WindowKind::Entity { entity_id: widget });
 
                     let (_id, task_id) = window::open(win_settings.clone());
-                    task.push(
-                        task_id.map(move |actual_id| Message::WindowActuallyOpened(actual_id)),
-                    );
+                    task.push(task_id.map(Message::WindowActuallyOpened));
                 }
 
                 if task.is_empty() {
