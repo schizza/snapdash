@@ -3,13 +3,14 @@ name: Sync Labels
 on:
   push:
     branches: [main, dev]
-    path:
-      - '.github/labels.yml'
-      - '.github/workflows/sync-labels.yml'
-  workflow_dispatch: 
+    paths:
+      - ".github/labels.yml"
+      - ".github/workflows/sync-labels.yml"
+  workflow_dispatch:
 
 permissions:
   issues: write
+  contents: read
 
 jobs:
   sync:
@@ -21,4 +22,4 @@ jobs:
           config-file: .github/labels.yml
           delete-other-labels: true
           dry-run: false
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
