@@ -65,7 +65,6 @@ pub fn with_debug_overlay<'a>(
     if !app.config.debug_overlay {
         return inner;
     }
-
     let p = app.theme.palette();
     let last_delta = win
         .debug
@@ -152,8 +151,7 @@ pub fn with_mouse_area<'a>(
         .on_exit(Message::EntityHover {
             window: id,
             on: false,
-        })
-        .into();
+        });
 
     match win.kind {
         WindowKind::Entity { .. } => ma.on_press(Message::StartDrag(id)).into(),

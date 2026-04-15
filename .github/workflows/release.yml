@@ -1,0 +1,143 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write  # needed to upload release assets
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: snapdash
+            asset_name: snapdash-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+            archive_cmd: tar -czf
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact_name: snapdash
+            asset_name: snapdash-${{ github.event.release.tag_name }}-macos-aarch64.tar.gz
+            archive_cmd: tar -czf
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: snapdash
+            asset_name: snapdash-${{ github.event.release.tag_name }}-macos-x86_64.tar.gz
+            archive_cmd: tar -czf
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: snapdash.exe
+            asset_name: snapdash-${{ github.event.release.tag_name }}-windows-x86_64.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libgl1-mesa-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # --- macOS: create .app bundle + .tar.gz ---
+      - name: Create macOS .app bundle
+        if: runner.os == 'macOS'
+        run: |
+          APP_NAME="Snapdash"
+          BIN_NAME="snapdash"
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+
+          DIST_DIR="dist"
+          APP_DIR="${DIST_DIR}/${APP_NAME}.app"
+          CONTENTS="${APP_DIR}/Contents"
+          MACOS_DIR="${CONTENTS}/MacOS"
+          RES_DIR="${CONTENTS}/Resources"
+
+          mkdir -p "${MACOS_DIR}" "${RES_DIR}"
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}" "${MACOS_DIR}/${APP_NAME}"
+          chmod +x "${MACOS_DIR}/${APP_NAME}"
+
+          cat > "${CONTENTS}/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>${APP_NAME}</string>
+            <key>CFBundleDisplayName</key><string>${APP_NAME}</string>
+            <key>CFBundleIdentifier</key><string>com.snapdash.Snapdash</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundleExecutable</key><string>${APP_NAME}</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+          </dict>
+          </plist>
+          EOF
+
+          cd "${DIST_DIR}"
+          tar -czf "../${{ matrix.asset_name }}" "${APP_NAME}.app"
+
+      # --- Linux: tarball with the binary + README + LICENSE ---
+      - name: Package Linux binary
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} dist/
+          cp README.md LICENSE NOTICE dist/
+          cd dist
+          tar -czf "../${{ matrix.asset_name }}" .
+
+      # --- Windows: zip the .exe + README + LICENSE ---
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" -Destination dist/
+          Copy-Item README.md, LICENSE, NOTICE -Destination dist/
+          Compress-Archive -Path "dist/*" -DestinationPath "${{ matrix.asset_name }}"
+
+      - name: Compute SHA256
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            powershell -Command "(Get-FileHash '${{ matrix.asset_name }}' -Algorithm SHA256).Hash.ToLower()" > "${{ matrix.asset_name }}.sha256"
+          else
+            shasum -a 256 "${{ matrix.asset_name }}" | cut -d' ' -f1 > "${{ matrix.asset_name }}.sha256"
+          fi
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ matrix.asset_name }}
+            ${{ matrix.asset_name }}.sha256

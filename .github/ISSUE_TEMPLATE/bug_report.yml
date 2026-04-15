@@ -1,0 +1,96 @@
+name: 🐛 Bug report
+description: Report a crash or incorrect behavior in Snapdash.
+labels: ["fix"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! 🙏
+        Please fill in as much detail as possible — it helps us fix it faster.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what you expected vs. what actually happened.
+      placeholder: "I expected ... but instead ..."
+    validations:
+      required: true
+
+  - type: input
+    id: snapdash-version
+    attributes:
+      label: Snapdash version
+      description: Shown in Settings → bottom status bar, or `snapdash --version` (if built from source).
+      placeholder: "e.g. 0.0.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 10
+        - Windows 11
+        - Linux (X11)
+        - Linux (Wayland)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version / distribution
+      placeholder: "e.g. macOS 15.4, Ubuntu 24.04, Windows 11 23H2"
+    validations:
+      required: true
+
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version (if applicable)
+      placeholder: "e.g. 2026.4.1"
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Settings window
+        2. Toggle XYZ
+        3. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Attach relevant lines from `debug.log`:
+        - macOS: `~/Library/Application Support/dev.snapdash.Snapdash/debug.log`
+        - Windows: `%APPDATA%\dev.snapdash.Snapdash\debug.log`
+        - Linux: `~/.local/share/snapdash/debug.log`
+
+        Please anonymize tokens, IPs, or sensor data you don't want public.
+      render: shell
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / recordings
+      description: Drag & drop images or short videos here (optional).
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and discussions
+          required: true
+        - label: I'm running the latest Snapdash release
+          required: true

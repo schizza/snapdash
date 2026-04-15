@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Q&A / General discussion
+    url: https://github.com/schizza/snapdash/discussion
+    about: Questions about usage, configuration tips, ideas - Issues are for bugs and feature requests only.
+  - name: Snapdash website
+    url: https://snapdash.schizza.cz
+    about: Documentation and downloads.
+  - name: Home Assistant
+    url: https://www.home-assistant.io/
+    about: For HA-specific questions, try the Home Assistant community
