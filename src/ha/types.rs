@@ -22,7 +22,6 @@ pub enum HaEvent {
     Disconnected(String),
     InitialState(Vec<EntityState>),
     StateChanged { new_state: EntityState },
-    Other,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

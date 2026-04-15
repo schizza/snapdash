@@ -45,7 +45,7 @@ fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
 }
 
 fn pulse_border(p: Palette, pulse: f32) -> iced::Color {
-    let t = pulse.max(0.0).min(1.0);
+    let t = pulse.clamp(0.0, 1.0);
 
     let a = 0.10 + 0.55 * t;
 
