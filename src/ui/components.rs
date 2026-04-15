@@ -1,7 +1,6 @@
 use iced::overlay::menu;
 use iced::widget::{
-    TextInput, button, checkbox, column, container, pick_list, row, scrollable, stack, text,
-    text_input,
+    button, checkbox, column, container, pick_list, row, scrollable, stack, text, text_input,
 };
 use iced::{Background, Border, Element, Length};
 
@@ -254,17 +253,17 @@ pub fn section(label: &'static str, p: Palette) -> text::Text<'static> {
 }
 
 // Left here intentionaly, usage in future?
-pub fn label<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
-    text(label.into()).color(p.text_secondary).size(14)
-}
+// pub fn label<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
+//     text(label.into()).color(p.text_secondary).size(14)
+// }
 
 pub fn dimmed<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
     text(label.into()).color(p.text_dim).size(10)
 }
 
-pub fn logbox<S: Into<String>>(label: S, p: Palette) -> TextInput<'static, Message> {
-    text_input("Empty", &label.into()).size(10).into()
-}
+// pub fn logbox<S: Into<String>>(label: S, p: Palette) -> TextInput<'static, Message> {
+//     text_input("Empty", &label.into()).size(10).into()
+// }
 
 pub fn card_with_border(
     content: Element<Message>,
@@ -290,26 +289,26 @@ pub fn card_with_border(
         .into()
 }
 
-pub fn card_plain(
-    content: Element<Message>,
-    p: Palette,
-    border_color: iced::Color,
-) -> Element<Message> {
-    iced::widget::container(content)
-        .padding(16)
-        .style(move |_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(p.card)), // bílá
-            border: iced::Border {
-                radius: crate::theme::metric::RADIUS.into(),
-                width: 0.0,
-                color: iced::Color::TRANSPARENT,
-            },
-            shadow: p.shadow, // klidně nech / nebo dej menší
-            ..Default::default()
-        })
-        .into()
-}
-
+// pub fn card_plain(
+//     content: Element<Message>,
+//     p: Palette,
+//     border_color: iced::Color,
+// ) -> Element<Message> {
+//     iced::widget::container(content)
+//         .padding(16)
+//         .style(move |_| iced::widget::container::Style {
+//             background: Some(iced::Background::Color(p.card)), // bílá
+//             border: iced::Border {
+//                 radius: crate::theme::metric::RADIUS.into(),
+//                 width: 0.0,
+//                 color: iced::Color::TRANSPARENT,
+//             },
+//             shadow: p.shadow, // klidně nech / nebo dej menší
+//             ..Default::default()
+//         })
+//         .into()
+// }
+//
 pub fn status_dot(p: Palette, ok: bool) -> Element<'static, Message> {
     let color = if ok { p.success } else { p.danger };
 
