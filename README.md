@@ -28,7 +28,7 @@ SnapDash is designed to run quietly in the background without leaks, lag, or sur
 
 | Widget | Settings |
 |:---:|:---:|
-| ![Screenshot](screenshots/settings.png) | ![Widget1](screenshots/widget_1.png) \ ![Widget2](screenshots\widget_2.png) |
+| ![Screenshot](screenshots/settings.png) | ![Widget1](screenshots/widget_1.png) ![Widget2](screenshots/widget_2.png) |
 
 ## Features
 
