@@ -39,7 +39,7 @@ keyring = { version = "3.6.3", features = [
   "sync-secret-service",
   "vendored",
 ] }
-reqwest = { version = "0.12.25", features = [
+reqwest = { version = "0.13.2", features = [
   "json",
   "rustls-tls",
   "native-tls-vendored",
@@ -52,30 +52,23 @@ tokio = { version = "1.48.0", features = [
   "time",
   "fs",
 ] }
-tokio-tungstenite = { version = "0.28.0", features = [
+tokio-tungstenite = { version = "0.29.0", features = [
   "rustls-tls-webpki-roots",
 ] }
-toml = "0.9.8"
+toml = "1.1.2+spec-1.1.0"
 url = "2.5.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-quartz-core = "0.3.2"
 
 [patch.crates-io]
-iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p3" }
-iced_winit = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p3" }
-iced_runtime = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p3" }
-iced_program = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p3" }
-iced_renderer = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p3" }
-iced_widget = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p3" }
-iced_core = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p3" }
-
-# iced_winit = { path = "vendor/iced/winit" }
-# iced_runtime = { path = "vendor/iced/runtime" }
-# iced_program = { path = "vendor/iced/program" }
-# iced_renderer = { path = "vendor/iced/renderer" }
-# iced_widget = { path = "vendor/iced/widget" }
-# iced_core = { path = "vendor/iced/core" }
+iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
+iced_winit = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
+iced_runtime = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
+iced_program = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
+iced_renderer = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
+iced_widget = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
+iced_core = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
 
 [profile.release]
 opt-level = "z"
