@@ -3,6 +3,7 @@
 # SnapDash
 
 **A pluggable desktop widget system - Home Assistant today, anything tomorrow.**
+
 [![CI](https://github.com/schizza/snapdash/actions/workflows/ci.yml/badge.svg)](https://github.com/schizza/snapdash/actions/workflows/ci.yml)
   [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
   [![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
@@ -25,11 +26,9 @@ SnapDash is designed to run quietly in the background without leaks, lag, or sur
 
 🚧 **Status: Early development / MVP** — first public release, expect rough edges.
 
-<-!-- TODO: add screenshots/snapdash-settings.png and snapdash-widget.png -->
-
 | Widget | Settings |
 |:---:|:---:|
-| _coming soon_ | _coming soon_ |
+| ![Screenshot](screenshots/settings.png) | ![Widget1](screenshots/widget_1.png) ![Widget2](screenshots/widget_2.png) |
 
 ## Features
 
@@ -55,12 +54,41 @@ Rust lets us build a widget that doesn’t slowly eat memory, doesn’t spike th
 
 Grab the latest release for your platform from the [Releases page](https://github.com/schizza/snapdash/releases):
 
-- **macOS**: `.dmg` (Apple Silicon)
-- **Windows**: `.exe` portable / `.msi` installer
+- **macOS**: `.tar.gz` (Apple Silicon) / `.dmg` will be added later
+- **Windows**: `.zip` portable / `.msi` installer (will be added later)
 - **Linux**: `.tar.gz` portable / `.AppImage`
 
-⚠️ macOS binaries are **not yet code-signed**. macOS will warn about an "unidentified
-  developer" — open it via `Right-click → Open` once.
+⚠️ macOS binaries are **not yet code-signed**. Signing of application is in process now.
+macOS will warn about an "unidentified developer" — open it via `Right-click → Open` once.
+
+**"Snapdash is damaged and can't be opened" on macOS**
+
+macOS blocks unsigned apps from the internet. Snapdash is not yet
+signed with an Apple Developer ID - we are tracking this in
+[#12](https://github.com/schizza/snapdash/issues/12).
+
+**Remove the quarantine attributes** (one-time, recommended):
+
+```bash
+xattr -cr /Applications/Snapdash.app  # or where your Snapdash.app lives
+```
+
+Or right-click the app -> **Open** -> click **Open** in the dialog.
+Either way, very the download first:
+
+```bash
+shasum -a 256 -c snapdash-vX.Y.Z-macos-aarch64.tar.gz.sha256
+```
+
+**Easier: install via Homebrew** (recommended):
+
+```bash
+brew tap schizza/tap
+brew install --cask snapdash
+```
+
+Homebrew automatically removes the quarantione attributes and handles
+updates via `brew upgrade`.
 
 ### Build from source
 
