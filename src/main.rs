@@ -16,6 +16,7 @@ fn main() -> iced::Result {
         app::Snapdash::update,
         app::Snapdash::view,
     )
+    .style(app::Snapdash::style)
     .subscription(app::Snapdash::subscription)
     .run()
 }

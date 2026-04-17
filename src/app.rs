@@ -795,4 +795,21 @@ impl Snapdash {
             WindowKind::Settings => inner,
         }
     }
+
+    /// Surface clear color for every window.
+    ///
+    /// All Snapdash windows are created with `window::Settings { transparent: true,
+    /// decorations: false, .. }` and draw their own rounded `card(...)` on top.
+    /// Without overriding the default `Program::style`, iced clears the surface to
+    /// the current `iced::Theme`'s opaque background, which then shows through at
+    /// the four corners as solid triangles (the area outside the rounded SDF but
+    /// inside the window rectangle). Clearing to `Color::TRANSPARENT` lets the
+    /// compositor blend those corner pixels with whatever is behind the window —
+    /// which is what every GTK4/libadwaita app does.
+    pub fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
+        iced::theme::Style {
+            background_color: iced::Color::TRANSPARENT,
+            text_color: self.theme.palette().text_primary,
+        }
+    }
 }
