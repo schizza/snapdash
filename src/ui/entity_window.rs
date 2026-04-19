@@ -57,21 +57,44 @@ fn pulse_border(p: Palette, pulse: f32) -> iced::Color {
     }
 }
 
-pub fn view(state: &EntityWindowState, p: Palette, connected: bool) -> Element<'_, Message> {
+pub fn view(
+    state: &EntityWindowState,
+    p: Palette,
+    connected: bool,
+    update: bool,
+) -> Element<'_, Message> {
     let (friendly, main_opt, detail) = format_main_value(state);
 
-    let title_text = if let Some(name) = friendly {
-        text(name)
-            .size(14)
-            .style(move |_: &iced::Theme| iced::widget::text::Style {
-                color: Some(p.text_secondary),
-            })
+    let update_icon = if update {
+        components::dimmed(
+            '⟳',
+            crate::theme::Palette {
+                text_dim: iced::Color::from_rgb8(255, 0, 0),
+                ..p
+            },
+        )
     } else {
-        text(pretty_name(&state.entity_id))
-            .size(14)
-            .style(move |_: &iced::Theme| iced::widget::text::Style {
-                color: Some(p.text_secondary),
-            })
+        components::dimmed("", p)
+    };
+    let title_text = if let Some(name) = friendly {
+        row![
+            column![text(name).size(14).style(move |_: &iced::Theme| {
+                iced::widget::text::Style {
+                    color: Some(p.text_secondary),
+                }
+            }),]
+            .width(iced::Fill),
+            update_icon
+        ]
+    } else {
+        row![
+            text(pretty_name(&state.entity_id))
+                .size(14)
+                .style(move |_: &iced::Theme| iced::widget::text::Style {
+                    color: Some(p.text_secondary),
+                }),
+            update_icon
+        ]
     };
 
     let main = main_opt.unwrap_or_else(|| "-".into());

@@ -7,6 +7,7 @@ mod logger;
 mod secrets;
 mod theme;
 mod ui;
+mod update;
 
 use iced::daemon;
 
