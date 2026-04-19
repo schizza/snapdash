@@ -6,7 +6,7 @@ use iced::{Alignment, Element, Length};
 #[cfg(feature = "diagnostics")]
 use iced::{Background, Border};
 
-use crate::app::{Message, WindowKind, WindowState};
+use crate::app::{Message, UpdateState, WindowKind, WindowState};
 use crate::ui::theme::{UiTheme, icon_button, icon_text};
 
 /// Returns window content based on its kind (`Settings` / `Entity`).
@@ -17,9 +17,12 @@ pub fn window_content<'a>(
 ) -> Element<'a, Message> {
     match &win.kind {
         WindowKind::Settings => crate::ui::settings::view(app, id),
-        WindowKind::Entity { .. } => {
-            crate::ui::entity_window::view(&win.entity, app.theme.palette(), app.ha_connected)
-        }
+        WindowKind::Entity { .. } => crate::ui::entity_window::view(
+            &win.entity,
+            app.theme.palette(),
+            app.ha_connected,
+            app.update_state == UpdateState::UpdateAvailable,
+        ),
     }
 }
 

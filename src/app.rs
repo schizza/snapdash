@@ -1,6 +1,6 @@
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
-use crate::logger as log;
 use crate::logger::LogType;
+use crate::{logger as log, update};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -78,6 +78,13 @@ pub enum FocusDirection {
     Previous,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateState {
+    Unknown,
+    UptoDate,
+    UpdateAvailable,
+}
+
 #[derive(Debug)]
 pub struct Snapdash {
     pub config: Config,
@@ -103,6 +110,7 @@ pub struct Snapdash {
 
     pub entity_search_query: String,
     pub debug_now: Instant,
+    pub update_state: UpdateState,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +153,8 @@ pub enum Message {
     },
 
     EntitySearchChanged(String),
+    CheckForUpdate,
+    LastVersionChecked(Option<update::GitHubRelease>),
 }
 
 impl Snapdash {
@@ -167,6 +177,7 @@ impl Snapdash {
             active_settings_sensors: Vec::new(),
             entity_search_query: String::new(),
             debug_now: Instant::now(),
+            update_state: UpdateState::Unknown,
         }
     }
     pub fn boot() -> (Self, Task<Message>) {
@@ -177,7 +188,11 @@ impl Snapdash {
             Message::ConfigLoad,
         );
 
-        (state, load_task)
+        let check_update = Task::perform(update::get_latest_version(), Message::LastVersionChecked);
+
+        let tasks = Task::batch([load_task, check_update]);
+
+        (state, tasks)
     }
 
     fn rebuild_active_settings_sensors(&mut self) {
@@ -283,11 +298,15 @@ impl Snapdash {
             })
         });
 
+        let check_for_update =
+            iced::time::every(Duration::from_hours(1)).map(|_| Message::CheckForUpdate);
+
         Subscription::batch([
             window::close_events().map(Message::WindowClosed),
             redraw_events,
             keyboard_events,
             ha,
+            check_for_update,
         ])
     }
 
@@ -781,6 +800,20 @@ impl Snapdash {
             Message::WindowRedraw(id, now) => {
                 self.handle_redraw_requested(id, now);
                 Task::none()
+            }
+
+            Message::CheckForUpdate => {
+                Task::perform(update::get_latest_version(), Message::LastVersionChecked)
+            }
+
+            Message::LastVersionChecked(release) => {
+                if release.is_some() {
+                    self.update_state = UpdateState::UpdateAvailable;
+                    Task::none()
+                } else {
+                    self.update_state = UpdateState::UptoDate;
+                    Task::none()
+                }
             }
         }
     }
