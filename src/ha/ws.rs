@@ -4,7 +4,7 @@ use iced::futures::{SinkExt, StreamExt};
 use iced::stream;
 use serde_json::json;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::time::{Instant, interval, sleep};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::Utf8Bytes;
 
@@ -135,20 +135,53 @@ pub fn connect(config: &HaConnectionConfig) -> iced::futures::stream::BoxStream<
             let initial_states = rest::fetch_all_states(ha_url.clone(), token.clone()).await;
             let _ = output.send(HaEvent::InitialState(initial_states)).await;
 
-            while let Some(msg) = stream.next().await {
-                let Ok(msg) = msg else { continue };
-                let Ok(text) = msg.to_text() else { continue };
+            let mut heartbeat = interval(Duration::from_secs(30));
+            let mut last_received = Instant::now();
 
-                if let Ok(parsed) = serde_json::from_str::<Incoming>(text)
-                    && parsed.r#type == "event"
-                    && let Some(ev) = parsed.event
-                    && ev.event_type == "state_changed"
-                    && let Some(data) = ev.data
-                    && let Some(new_state) = data.new_state
-                {
-                    let _ = output.send(HaEvent::StateChanged { new_state }).await;
+            loop {
+                tokio::select! {
+                    msg = stream.next() => {
+                        let Some(msg) = msg else { break };
+                        let Ok(msg) = msg else { continue };
+
+                        last_received = Instant::now();
+
+                        let Ok(text) = msg.to_text() else { continue };
+
+                        if let Ok(parsed) = serde_json::from_str::<Incoming>(text)
+                        && parsed.r#type == "event"
+                        && let Some(ev) = parsed.event
+                        && ev.event_type == "state_changed"
+                        && let Some(data) = ev.data
+                        && let Some(new_state) = data.new_state
+                        {
+                            let _ = output.send(HaEvent::StateChanged { new_state}).await;
+                        }
+                    }
+                    _ = heartbeat.tick() => {
+                            if last_received.elapsed() > Duration::from_secs(90) {
+                                break;
+                            }
+                            if sink.send(WsMessage::Ping(vec![].into())).await.is_err()
+                            { break; }
+                        }
                 }
             }
+
+            // while let Some(msg) = stream.next().await {
+            //     let Ok(msg) = msg else { continue };
+            //     let Ok(text) = msg.to_text() else { continue };
+            //
+            //     if let Ok(parsed) = serde_json::from_str::<Incoming>(text)
+            //         && parsed.r#type == "event"
+            //         && let Some(ev) = parsed.event
+            //         && ev.event_type == "state_changed"
+            //         && let Some(data) = ev.data
+            //         && let Some(new_state) = data.new_state
+            //     {
+            //         let _ = output.send(HaEvent::StateChanged { new_state }).await;
+            //     }
+            // }
 
             let _ = output.send(HaEvent::Disconnected("ws closed".into())).await;
             sleep(Duration::from_secs(2)).await;
