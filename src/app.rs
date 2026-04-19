@@ -1,6 +1,6 @@
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
-use crate::logger as log;
 use crate::logger::LogType;
+use crate::{logger as log, update};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -78,6 +78,13 @@ pub enum FocusDirection {
     Previous,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateState {
+    Unknown,
+    UptoDate,
+    UpdateAvailable,
+}
+
 #[derive(Debug)]
 pub struct Snapdash {
     pub config: Config,
@@ -103,6 +110,7 @@ pub struct Snapdash {
 
     pub entity_search_query: String,
     pub debug_now: Instant,
+    pub update_state: UpdateState,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +153,8 @@ pub enum Message {
     },
 
     EntitySearchChanged(String),
+    CheckForUpdate,
+    LastVersionChecked(Option<update::GitHubRelease>),
 }
 
 impl Snapdash {
@@ -167,6 +177,7 @@ impl Snapdash {
             active_settings_sensors: Vec::new(),
             entity_search_query: String::new(),
             debug_now: Instant::now(),
+            update_state: UpdateState::Unknown,
         }
     }
     pub fn boot() -> (Self, Task<Message>) {
@@ -177,7 +188,11 @@ impl Snapdash {
             Message::ConfigLoad,
         );
 
-        (state, load_task)
+        let check_update = Task::perform(update::get_latest_version(), Message::LastVersionChecked);
+
+        let tasks = Task::batch([load_task, check_update]);
+
+        (state, tasks)
     }
 
     fn rebuild_active_settings_sensors(&mut self) {
@@ -283,11 +298,15 @@ impl Snapdash {
             })
         });
 
+        let check_for_update =
+            iced::time::every(Duration::from_hours(1)).map(|_| Message::CheckForUpdate);
+
         Subscription::batch([
             window::close_events().map(Message::WindowClosed),
             redraw_events,
             keyboard_events,
             ha,
+            check_for_update,
         ])
     }
 
@@ -644,8 +663,12 @@ impl Snapdash {
 
                 self.pending_opens.push_back(WindowKind::Settings);
 
+                // The platform helper adds a transparent shadow margin on
+                // Linux (where we render our own shader shadow) and is a
+                // no-op on macOS/Windows (where the OS clips + draws its
+                // own shadow). See `ui::platform` module doc.
                 let settings = window::Settings {
-                    size: iced::Size::new(820.0, 950.0),
+                    size: crate::ui::platform::window_size(820.0, 950.0),
                     resizable: false,
                     decorations: false,
                     transparent: true,
@@ -668,8 +691,10 @@ impl Snapdash {
                     vec![entity_id]
                 };
 
+                // Platform helper: adds shadow margin on Linux, pass-through
+                // on macOS/Windows. See `ui::platform` module doc.
                 let win_settings = window::Settings {
-                    size: iced::Size::new(240.0, 160.0),
+                    size: crate::ui::platform::window_size(240.0, 160.0),
                     resizable: false,
                     decorations: false,
                     transparent: true,
@@ -776,6 +801,20 @@ impl Snapdash {
                 self.handle_redraw_requested(id, now);
                 Task::none()
             }
+
+            Message::CheckForUpdate => {
+                Task::perform(update::get_latest_version(), Message::LastVersionChecked)
+            }
+
+            Message::LastVersionChecked(release) => {
+                if release.is_some() {
+                    self.update_state = UpdateState::UpdateAvailable;
+                    Task::none()
+                } else {
+                    self.update_state = UpdateState::UptoDate;
+                    Task::none()
+                }
+            }
         }
     }
 
@@ -787,12 +826,36 @@ impl Snapdash {
         let inner = crate::ui::chrome::window_content(self, win, id);
         let inner = crate::ui::chrome::with_debug_overlay(self, inner, win);
 
-        match win.kind {
+        let inner = match win.kind {
             WindowKind::Entity { .. } => {
                 let with_gear = crate::ui::chrome::with_gear_overlay(self, inner, win);
                 crate::ui::chrome::with_mouse_area(with_gear, id, win)
             }
             WindowKind::Settings => inner,
+        };
+
+        // Platform-specific outer wrapping:
+        // - Linux: transparent `SHADOW_MARGIN` padding around the card so
+        //   the iced-wgpu shader shadow has room to fade inside the surface.
+        // - macOS/Windows: pass-through. The OS hack in iced_winit clips the
+        //   window to a rounded shape and the OS draws the drop shadow.
+        crate::ui::platform::wrap_outer(inner)
+    }
+
+    /// Surface clear color. **Linux-only**: set to `Color::TRANSPARENT` so the
+    /// cleared pixels in the shadow margin actually composite as transparent
+    /// (the default theme background would show as an opaque color there).
+    ///
+    /// On macOS/Windows we intentionally do NOT install this callback (see
+    /// `main.rs`) — the OS hack clips the window to a rounded shape before
+    /// any cleared pixel is visible, so the default opaque theme background
+    /// is never seen and matches the pre-shadow-margin behavior users
+    /// reported looked "nice and optimal".
+    #[cfg(target_os = "linux")]
+    pub fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
+        iced::theme::Style {
+            background_color: iced::Color::TRANSPARENT,
+            text_color: self.theme.palette().text_primary,
         }
     }
 }

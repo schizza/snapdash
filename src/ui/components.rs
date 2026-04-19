@@ -257,6 +257,26 @@ pub fn section(label: &'static str, p: Palette) -> text::Text<'static> {
 //     text(label.into()).color(p.text_secondary).size(14)
 // }
 
+pub fn badge<'a>(label: impl Into<String>, p: Palette) -> Element<'a, Message> {
+    container(
+        text(label.into())
+            .size(11)
+            .style(move |_: &iced::Theme| iced::widget::text::Style {
+                color: Some(p.accent),
+            }),
+    )
+    .padding([3, 10])
+    .style(move |_| container::Style {
+        background: Some(Background::Color(p.accent_tint)),
+        border: Border {
+            radius: 999.0.into(),
+            width: 1.0,
+            color: p.accent,
+        },
+        ..Default::default()
+    })
+    .into()
+}
 pub fn dimmed<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
     text(label.into()).color(p.text_dim).size(10)
 }
