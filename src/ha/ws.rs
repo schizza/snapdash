@@ -49,7 +49,22 @@ pub fn connect(config: &HaConnectionConfig) -> iced::futures::stream::BoxStream<
     let token = config.token.clone();
 
     stream::channel(100, async move |mut output| {
+        let mut auth_failures: u8 = 0;
+        let mut connect_backoff = Duration::from_secs(2);
+        const MAX_AUTH_FAILURES: u8 = 2;
+        const MAX_BACKOFF: Duration = Duration::from_secs(60);
+
         loop {
+            if auth_failures >= MAX_AUTH_FAILURES {
+                let _ = output
+                .send(HaEvent::AuthFailed(format!("Authentication failed {auth_failures} times - stopped retrying. Check your token.")))
+                .await;
+
+                loop {
+                    sleep(Duration::from_secs(3600)).await;
+                }
+            }
+
             let ws_url = ws_url_from_http(&ha_url);
 
             let (ws, _resp) = match tokio_tungstenite::connect_async(&ws_url).await {
@@ -58,7 +73,8 @@ pub fn connect(config: &HaConnectionConfig) -> iced::futures::stream::BoxStream<
                     let _ = output
                         .send(HaEvent::Disconnected(format!("connect: {e}")))
                         .await;
-                    sleep(Duration::from_secs(3)).await;
+                    sleep(connect_backoff).await;
+                    connect_backoff = (connect_backoff * 2).min(MAX_BACKOFF);
                     continue;
                 }
             };
@@ -96,12 +112,14 @@ pub fn connect(config: &HaConnectionConfig) -> iced::futures::stream::BoxStream<
 
                 if text.contains("\"auth_ok\"") {
                     authed = true;
+                    auth_failures = 0;
                     break;
                 }
 
                 if text.contains("\"auth_invalid\"") {
+                    auth_failures += 1;
                     let _ = output
-                        .send(HaEvent::Disconnected("auth_invalid".into()))
+                        .send(HaEvent::Disconnected(format!("auth_invalid (attempt {auth_failures}/{MAX_AUTH_FAILURES}")))
                         .await;
                     break;
                 }
@@ -131,6 +149,7 @@ pub fn connect(config: &HaConnectionConfig) -> iced::futures::stream::BoxStream<
             }
 
             let _ = output.send(HaEvent::Connected).await;
+            connect_backoff = Duration::from_secs(2);
 
             let initial_states = rest::fetch_all_states(ha_url.clone(), token.clone()).await;
             let _ = output.send(HaEvent::InitialState(initial_states)).await;
