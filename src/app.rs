@@ -419,6 +419,17 @@ impl Snapdash {
             HaEvent::StateChanged { new_state } => {
                 self.apply_entity_state(new_state);
             }
+            HaEvent::AuthFailed(why) => {
+                self.ha_connected = false;
+                self.ha_connection = None;
+                self.config.ha_token_present = false;
+
+                self.set_status(format!("Authentication failed: {why}"), LogType::Error);
+                let cfg = self.config.clone();
+                let _ = Task::perform(async move { cfg.save_async().await }, |_| {
+                    Message::SaveConfig
+                });
+            }
         }
     }
 
