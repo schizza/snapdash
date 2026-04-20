@@ -426,7 +426,9 @@ impl Snapdash {
 
                 self.set_status(format!("Authentication failed: {why}"), LogType::Error);
                 let cfg = self.config.clone();
-                tokio::spawn(async move { cfg.save_async().await });
+                let _ = Task::perform(async move { cfg.save_async().await }, |_| {
+                    Message::SaveConfig
+                });
             }
         }
     }
