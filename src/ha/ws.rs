@@ -168,21 +168,6 @@ pub fn connect(config: &HaConnectionConfig) -> iced::futures::stream::BoxStream<
                 }
             }
 
-            // while let Some(msg) = stream.next().await {
-            //     let Ok(msg) = msg else { continue };
-            //     let Ok(text) = msg.to_text() else { continue };
-            //
-            //     if let Ok(parsed) = serde_json::from_str::<Incoming>(text)
-            //         && parsed.r#type == "event"
-            //         && let Some(ev) = parsed.event
-            //         && ev.event_type == "state_changed"
-            //         && let Some(data) = ev.data
-            //         && let Some(new_state) = data.new_state
-            //     {
-            //         let _ = output.send(HaEvent::StateChanged { new_state }).await;
-            //     }
-            // }
-
             let _ = output.send(HaEvent::Disconnected("ws closed".into())).await;
             sleep(Duration::from_secs(2)).await;
         }
