@@ -110,6 +110,7 @@ fn ws_url_from_http(ha_url: &str) -> Result<Url, HaError> {
     Ok(url)
 }
 
+#[tracing::instrument(skip_all, fields(url = %ws_url))]
 async fn open_session(token: &str, ws_url: &Url) -> Result<(WsSink, WsStream), HaError> {
     let (ws, _) = tokio_tungstenite::connect_async(ws_url.as_str())
         .await
@@ -130,6 +131,12 @@ async fn send_msg(
 ) -> Result<(), HaError> {
     let json = serde_json::to_string(msg).map_err(|e| HaError::Protocol(e.to_string()))?;
 
+    // do not log auth token!
+    if !matches!(msg, ClientMsg::Auth { .. }) {
+        tracing::trace!(what, payload = %json, "→ send");
+    } else {
+        tracing::trace!(what, "→ send (payload redacted)");
+    }
     sink.send(WsMessage::Text(Utf8Bytes::from(json)))
         .await
         .map_err(|_| HaError::SendFailed { what })
@@ -141,6 +148,7 @@ async fn read_msg<T: serde::de::DeserializeOwned>(stream: &mut WsStream) -> Resu
             Some(Err(e)) => return Err(HaError::Protocol(e.to_string())),
             Some(Ok(WsMessage::Close(_))) | None => return Err(HaError::Closed),
             Some(Ok(WsMessage::Text(text))) => {
+                tracing::trace!(raw = text.as_str(), "← recv");
                 return serde_json::from_str(text.as_str())
                     .map_err(|e| HaError::Protocol(e.to_string()));
             }
@@ -160,10 +168,14 @@ async fn expect<T: DeserializeOwned>(
         .map_err(|_| HaError::Timeout { what })?
 }
 
+#[tracing::instrument(skip_all)]
 async fn handshake(sink: &mut WsSink, stream: &mut WsStream, token: &str) -> Result<(), HaError> {
     // expect auth_required
+    tracing::debug!("waiting for auth_required");
     match expect::<ServerMsg>(stream, HANDSHAKE_TIMEOUT, "auth_required").await? {
-        ServerMsg::AuthRequired { .. } => {}
+        ServerMsg::AuthRequired { ha_version } => {
+            tracing::info!(%ha_version, "authenticating")
+        }
         other => {
             return Err(HaError::Protocol(format!(
                 "expected auth_required, got {other:?}"
@@ -172,6 +184,7 @@ async fn handshake(sink: &mut WsSink, stream: &mut WsStream, token: &str) -> Res
     }
 
     // send auth
+    tracing::debug!("sending auth");
     send_msg(
         sink,
         &ClientMsg::Auth {
@@ -182,8 +195,13 @@ async fn handshake(sink: &mut WsSink, stream: &mut WsStream, token: &str) -> Res
     .await?;
 
     // expect auth_ok / auth_invalid
+
+    tracing::debug!("waiting for auth result");
     match expect::<ServerMsg>(stream, HANDSHAKE_TIMEOUT, "auth_result").await? {
-        ServerMsg::AuthOk { .. } => Ok(()),
+        ServerMsg::AuthOk { .. } => {
+            tracing::debug!("auth succeeded");
+            Ok(())
+        }
         ServerMsg::AuthInvalid { message } => Err(HaError::AuthInvalid(message)),
         other => Err(HaError::Protocol(format!(
             "unexpected during auth: {other:?}"
@@ -191,6 +209,7 @@ async fn handshake(sink: &mut WsSink, stream: &mut WsStream, token: &str) -> Res
     }
 }
 
+#[tracing::instrument(skip_all)]
 async fn subscribe(sink: &mut WsSink) -> Result<(), HaError> {
     send_msg(
         sink,
@@ -203,6 +222,7 @@ async fn subscribe(sink: &mut WsSink) -> Result<(), HaError> {
     .await
 }
 
+#[tracing::instrument(skip_all)]
 async fn pump_events(
     sink: &mut WsSink,
     stream: &mut WsStream,
@@ -231,10 +251,8 @@ async fn pump_events(
 
                 let msg: ServerMsg = match serde_json::from_str(text.as_str()) {
                     Ok(m) => m,
-                    Err(_) => {
-                        // consider to create tracing. Eg: tracing::warn!(error = %e, raw = %text.as_str(), "failed to decode ServerMsg");
-                        // but this is suitable for now
-                        // tracing::warn!(error = %e, raw = %text.as_str(), "failed to decode ServerMsg");
+                    Err(e) => {
+                        tracing::warn!(error = %e, raw = text.as_str(), "failed to decode ServerMsg - skipping");
                         continue;
                     }
                 };
@@ -243,6 +261,11 @@ async fn pump_events(
                     && event.event_type == "state_changed"
                     && let Some(new_state) = event.data.new_state
                 {
+                    tracing::trace!(
+                        entity_id = %new_state.entity_id,
+                        state = %new_state.state,
+                        "state_changed"
+                    );
                     let _ = out.send(HaEvent::StateChanged { new_state }).await;
                 }
             }
@@ -251,6 +274,7 @@ async fn pump_events(
                 if last_received.elapsed() > STALE_AFTER {
                     return HaError::Stale { elapsed: last_received.elapsed() };
                 }
+                tracing::trace!("sending heartbeat ping");
                 if sink.send(WsMessage::Ping(Bytes::new())).await.is_err() {
                     return HaError::SendFailed { what: "ping" };
                 }
@@ -266,6 +290,7 @@ pub fn connect(config: &HaConnectionConfig) -> BoxStream<'static, HaEvent> {
         let ws_url = match ws_url_from_http(&cfg.url) {
             Ok(u) => u,
             Err(e) => {
+                tracing::error!(url= %cfg.url, error = %e, "invalid HA URL - stream ending");
                 let _ = out.send(HaEvent::Disconnected(e)).await;
                 return;
             }
@@ -277,6 +302,7 @@ pub fn connect(config: &HaConnectionConfig) -> BoxStream<'static, HaEvent> {
         loop {
             let (mut sink, mut stream) = match open_session(&cfg.token, &ws_url).await {
                 Ok(ws) => {
+                    tracing::info!("connected and subscribed to state_changed events");
                     auth_failures = 0;
                     backoff = INITIAL_BACKOFF;
                     ws
@@ -286,6 +312,10 @@ pub fn connect(config: &HaConnectionConfig) -> BoxStream<'static, HaEvent> {
                     let _ = out.send(HaEvent::Disconnected(e)).await;
 
                     if auth_failures >= MAX_AUTH_FAILURES {
+                        tracing::error!(
+                            attempts = auth_failures,
+                            "authentication exhausted - giving up"
+                        );
                         let _ = out
                             .send(HaEvent::AuthFailed(HaError::AuthExhausted {
                                 attempts: auth_failures,
@@ -293,10 +323,16 @@ pub fn connect(config: &HaConnectionConfig) -> BoxStream<'static, HaEvent> {
                             .await;
                         return; // stream ended
                     }
+                    tracing::warn!(
+                        attempt = auth_failures,
+                        max = MAX_AUTH_FAILURES,
+                        "authentication rejected - retrying"
+                    );
                     sleep(AUTH_RETRY_DELAY).await;
                     continue;
                 }
                 Err(e) => {
+                    tracing::warn!(error = %e, backoff_s = backoff.as_secs(), "reconnecting");
                     let _ = out.send(HaEvent::Disconnected(e)).await;
                     sleep(backoff).await;
                     backoff = (backoff * 2).min(MAX_BACKOFF);
@@ -307,6 +343,9 @@ pub fn connect(config: &HaConnectionConfig) -> BoxStream<'static, HaEvent> {
             // Autenticated + subscribed
             let _ = out.send(HaEvent::Connected).await;
             let initial = rest::fetch_all_states(&cfg.url, &cfg.token).await;
+
+            tracing::debug!(count = initial.len(), "received initial states");
+
             let _ = out.send(HaEvent::InitialState(initial)).await;
 
             // run Forrest, run!

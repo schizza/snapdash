@@ -1,10 +1,14 @@
-use std::fs::{OpenOptions, create_dir_all};
-use std::io::Write;
+use std::fs::OpenOptions;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
+use anyhow::Context;
 use directories::ProjectDirs;
 
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+/// UI status hint
+#[derive(Clone, Copy, Debug)]
 pub enum LogType {
     Info,
     Warn,
@@ -12,40 +16,49 @@ pub enum LogType {
     DoNotLog,
 }
 
-static LOG_FILE: OnceLock<PathBuf> = OnceLock::new();
+/// Initialize the global tracing subscriber.
+///
+/// Returns a `WorkerGuard` that **must be kept alive** for the lifetime of the
+/// process — dropping it flushes any pending log lines from the non-blocking
+/// file writer.
+///
+/// Env var `RUST_LOG` controls filtering; default is `snapdash=info,warn`.
+pub fn init() -> anyhow::Result<WorkerGuard> {
+    let log_path = log_path()?;
 
-pub fn error(msg: impl AsRef<str>) {
-    append(&format!("ERROR: {}", msg.as_ref()));
-}
-
-pub fn warn(msg: impl AsRef<str>) {
-    append(&format!("WARNING: {}", msg.as_ref()));
-}
-
-pub fn info(msg: impl AsRef<str>) {
-    append(&format!("INFO: {}", msg.as_ref()));
-}
-
-fn log_path() -> &'static PathBuf {
-    LOG_FILE.get_or_init(|| {
-        let proj = ProjectDirs::from("dev", "snapdash", "Snapdash")
-            .expect("cannot determine app data dir");
-
-        let dir = proj.data_dir();
-        create_dir_all(dir).ok();
-
-        dir.join("debug.log")
-    })
-}
-
-fn append(msg: &str) {
-    let path = log_path();
-
-    let now = std::time::SystemTime::now();
-    let ts = chrono::DateTime::<chrono::Local>::from(now).format("%Y-%m-%d %H:%M:%S%.3f");
-    let line = format!("{ts} {msg}");
-
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "{line}");
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
+
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .with_context(|| format!("cannot open log file {}", log_path.display()))?;
+
+    let (non_blocking, guard) = tracing_appender::non_blocking(file);
+
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("snapdash=info,warn"));
+
+    let file_layer = fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_target(true);
+
+    let stdout_layer = fmt::layer().with_writer(std::io::stdout).pretty();
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
+
+    Ok(guard)
+}
+
+fn log_path() -> anyhow::Result<PathBuf> {
+    let proj = ProjectDirs::from("dev", "snapdash", "Snapdash")
+        .context("cannot determine app data dir")?;
+    Ok(proj.data_dir().join("debug.log"))
 }
