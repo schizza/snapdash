@@ -15,15 +15,15 @@ pub enum LogType {
 static LOG_FILE: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn error(msg: impl AsRef<str>) {
-    append(&format!("ERROR {}", msg.as_ref()));
+    append(&format!("ERROR: {}", msg.as_ref()));
 }
 
 pub fn warn(msg: impl AsRef<str>) {
-    append(&format!("WARNING {}", msg.as_ref()));
+    append(&format!("WARNING: {}", msg.as_ref()));
 }
 
 pub fn info(msg: impl AsRef<str>) {
-    append(&format!("INFO {}", msg.as_ref()));
+    append(&format!("INFO: {}", msg.as_ref()));
 }
 
 fn log_path() -> &'static PathBuf {
@@ -42,8 +42,8 @@ fn append(msg: &str) {
     let path = log_path();
 
     let now = std::time::SystemTime::now();
-    let ts = chrono::DateTime::<chrono::Local>::from(now);
-    let line = format!("{ts}  {msg}");
+    let ts = chrono::DateTime::<chrono::Local>::from(now).format("%Y-%m-%d %H:%M:%S%.3f");
+    let line = format!("{ts} {msg}");
 
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(file, "{line}");
