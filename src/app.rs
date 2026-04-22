@@ -157,6 +157,12 @@ pub enum Message {
     LastVersionChecked(Option<update::GitHubRelease>),
 }
 
+impl Default for Snapdash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Snapdash {
     pub fn new() -> Self {
         Self {
