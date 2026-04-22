@@ -157,6 +157,12 @@ pub enum Message {
     LastVersionChecked(Option<update::GitHubRelease>),
 }
 
+impl Default for Snapdash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Snapdash {
     pub fn new() -> Self {
         Self {
@@ -167,7 +173,7 @@ impl Snapdash {
             ha_token_draft: String::new(),
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
-            windows: HashMap::new(),
+            windows: HashMap::new(), 
             pending_opens: VecDeque::new(),
             entities_by_id: HashMap::new(),
             entity_windows: HashMap::new(),
