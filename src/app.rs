@@ -1,3 +1,4 @@
+use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
 use crate::update;
@@ -409,15 +410,46 @@ impl Snapdash {
         }
     }
 
+    fn ha_error_status(error: &HaError) -> (String, LogType) {
+        match error {
+            HaError::AuthInvalid(msg) => {
+                (format!("Authentication rejected: {msg}"), LogType::Error)
+            }
+            HaError::AuthExhausted { attempts } => (
+                format!("Auth failed after {attempts} attempts - check your token"),
+                LogType::Error,
+            ),
+            HaError::Protocol(_) => (format!("HA protocol error: {error}"), LogType::Error),
+            HaError::Stale { elapsed } => (
+                format!(
+                    "HA connection stale ({}s), reconnecting...",
+                    elapsed.as_secs()
+                ),
+                LogType::Warn,
+            ),
+            HaError::Connect(_) => (format!("Cannoct reach HA: {error}"), LogType::Warn),
+            HaError::Timeout { what } => (
+                format!("HA timeout waiting for {what}, reconnecting..."),
+                LogType::Warn,
+            ),
+            HaError::SendFailed { what } => (
+                format!("Failed to send {what} to HA, reconnecting..."),
+                LogType::Warn,
+            ),
+            HaError::Closed => ("HA disconnected, reconnecting...".to_owned(), LogType::Info),
+        }
+    }
+
     fn handle_ha_event(&mut self, ev: HaEvent) {
         match ev {
             HaEvent::Connected => {
                 self.ha_connected = true;
                 self.set_status("HA Connected", LogType::Info);
             }
-            HaEvent::Disconnected(why) => {
+            HaEvent::Disconnected(error) => {
                 self.ha_connected = false;
-                self.set_status(format!("HA disconnected: {why}"), LogType::Warn);
+                let (msg, severity) = Snapdash::ha_error_status(&error);
+                self.set_status(msg, severity);
             }
             HaEvent::InitialState(states) => {
                 self.apply_initial_states(states);
@@ -425,12 +457,14 @@ impl Snapdash {
             HaEvent::StateChanged { new_state } => {
                 self.apply_entity_state(new_state);
             }
-            HaEvent::AuthFailed(why) => {
+            HaEvent::AuthFailed(error) => {
                 self.ha_connected = false;
                 self.ha_connection = None;
                 self.config.ha_token_present = false;
 
-                self.set_status(format!("Authentication failed: {why}"), LogType::Error);
+                let (msg, _) = Snapdash::ha_error_status(&error);
+                self.set_status(msg, LogType::Error);
+
                 let cfg = self.config.clone();
                 let _ = Task::perform(async move { cfg.save_async().await }, |_| {
                     Message::SaveConfig
@@ -445,7 +479,7 @@ impl Snapdash {
         match error_type {
             LogType::Info => tracing::info!(target: "snapdash::status", "{msg}"),
             LogType::Warn => tracing::warn!(target: "snapdash::status", "{msg}"),
-            LogType::Error => tracing::error!(target: "snapdash:status", "{msg}"),
+            LogType::Error => tracing::error!(target: "snapdash::status", "{msg}"),
             LogType::DoNotLog => (),
         }
         self.status = msg;
