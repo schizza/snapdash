@@ -62,7 +62,6 @@ pub fn init() -> Option<WorkerGuard> {
             None
         }
     }
-
 }
 
 fn try_file_writer() -> anyhow::Result<(NonBlocking, WorkerGuard)> {
