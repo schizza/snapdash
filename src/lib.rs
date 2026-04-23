@@ -18,7 +18,7 @@ use iced::daemon;
 /// card-filling-the-window layout make the default opaque theme clear
 /// color invisible, so we keep the iced default.
 pub fn run() -> iced::Result {
-    let _gurad = logger::init().expect("failed to initialize logger");
+    let _gurad = logger::init();
 
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "snapdash starting");
 
