@@ -1,6 +1,6 @@
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
-use crate::{logger as log, update};
+use crate::update;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -443,9 +443,9 @@ impl Snapdash {
     pub fn set_status(&mut self, msg: impl Into<String>, error_type: LogType) {
         let msg = msg.into();
         match error_type {
-            LogType::Info => log::info(&msg),
-            LogType::Warn => log::warn(&msg),
-            LogType::Error => log::error(&msg),
+            LogType::Info => tracing::info!(target: "snapdash::status", "{msg}"),
+            LogType::Warn => tracing::warn!(target: "snapdash::status", "{msg}"),
+            LogType::Error => tracing::error!(target: "snapdash:status", "{msg}"),
             LogType::DoNotLog => (),
         }
         self.status = msg;
@@ -504,7 +504,7 @@ impl Snapdash {
                         self.config.ha_token_present = false;
                         self.ha_connection = None;
                         self.ha_connected = false;
-                        log::warn("HA disconnected due to erased token.");
+                        tracing::warn!("HA disconected due to erased token.");
                     }
                     Err(s) => {
                         self.set_status(s, LogType::Error);
