@@ -17,7 +17,7 @@ type WsStream = iced::futures::stream::SplitStream<Ws>;
 
 const INITIAL_BACKOFF: Duration = Duration::from_secs(2);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
-const BACKOFF_JITTER_MAX: Duration = Duration::from_secs(500);
+const BACKOFF_JITTER_MAX: Duration = Duration::from_millis(500);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const STALE_AFTER: Duration = Duration::from_secs(90);
 const AUTH_RETRY_DELAY: Duration = Duration::from_secs(2);
@@ -342,8 +342,8 @@ pub fn connect(config: &HaConnectionConfig) -> BoxStream<'static, HaEvent> {
                 Err(e) => {
                     let jittered = backoff + jitter();
                     tracing::warn!(
-                        error = %e, 
-                        base_s = backoff.as_secs(), 
+                        error = %e,
+                        base_s = backoff.as_secs(),
                         jittered_ms = jittered.as_millis(),
                         "reconnecting"
                     );
