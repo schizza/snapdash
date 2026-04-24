@@ -118,8 +118,6 @@ run-host: run-$(HOST_OS)
         bundle install-local \
         ci all pre-commit \
         clean distclean \
-        bump-patch bump-minor bump-major \
-        audit outdated
 
 help:
 	@echo "Snapdash — Makefile"
@@ -201,7 +199,7 @@ docs:
 
 # ====== Format & lint ======
 fmt:
-	@cargo fmt -all
+	@cargo fmt --all
 
 fmt-check:
 	@cargo fmt --all --check
