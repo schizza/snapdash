@@ -1,4 +1,4 @@
-use iced::widget::{MouseArea, column, mouse_area, row, space, text, tooltip};
+use iced::widget::{column, mouse_area, row, space, text};
 use iced::{Alignment, Element, Length};
 
 use super::components;
@@ -66,16 +66,16 @@ pub fn view(
     let (friendly, main_opt, detail) = format_main_value(state);
 
     let update_icon: Element<Message> = if update {
-        
-        mouse_area(
-        components::dimmed(
+        mouse_area(components::dimmed(
             '⤓',
             crate::theme::Palette {
                 text_dim: iced::Color::from_rgb8(255, 0, 0),
                 ..p
             },
-        )).on_press(Message::OpenReleaseNotes).interaction(iced::mouse::Interaction::Pointer).into()
-        
+        ))
+        .on_press(Message::OpenReleaseNotes)
+        .interaction(iced::mouse::Interaction::Pointer)
+        .into()
     } else {
         components::dimmed("", p).into()
     };

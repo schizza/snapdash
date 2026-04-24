@@ -69,12 +69,16 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     let md_view: Element<Message> = iced::widget::themer(Some(md_theme), md_inner)
         .text_color(|theme: &iced::Theme| theme.palette().text)
         .into();
-    
-    let md_scroll: Element<Message> = components::scrollable(
-        container(md_view).padding(metric::GAP).width(Length::Fill).into(),
-        p,
-        ).height(Length::Fill).into();
 
+    let md_scroll: Element<Message> = components::scrollable(
+        container(md_view)
+            .padding(metric::GAP)
+            .width(Length::Fill)
+            .into(),
+        p,
+    )
+    .height(Length::Fill)
+    .into();
 
     let actions: Element<Message> = row![
         components::pill_button(
