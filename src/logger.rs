@@ -1,10 +1,14 @@
-use std::fs::{OpenOptions, create_dir_all};
-use std::io::Write;
+use std::fs::OpenOptions;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
+use anyhow::Context;
 use directories::ProjectDirs;
 
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+/// UI status hint
+#[derive(Clone, Copy, Debug)]
 pub enum LogType {
     Info,
     Warn,
@@ -12,40 +16,74 @@ pub enum LogType {
     DoNotLog,
 }
 
-static LOG_FILE: OnceLock<PathBuf> = OnceLock::new();
+/// Initialize the global tracing subscriber.
+///
+/// Always installs a stdout layer. File-logging is *best-effort*: if we
+/// cannot create or open the log file (read-only fs, permission denied,
+/// sandbox restriction), the reason is written to stderr and the app
+/// continues with stdout-only logging. File logging is not a startup
+/// prerequisite.
+///
+/// Returns `Some(WorkerGuard)` when the file layer is active — the guard
+/// must be kept alive for the process lifetime so pending writes flush on
+/// exit. `None` means stdout-only logging is in effect.
+pub fn init() -> Option<WorkerGuard> {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("snapdash=info,warn"));
 
-pub fn error(msg: impl AsRef<str>) {
-    append(&format!("ERROR {}", msg.as_ref()));
-}
+    let stdout_layer = fmt::layer().with_writer(std::io::stdout).pretty();
 
-pub fn warn(msg: impl AsRef<str>) {
-    append(&format!("WARNING {}", msg.as_ref()));
-}
+    match try_file_writer() {
+        Ok((non_blocking, guard)) => {
+            let file_layer = fmt::layer()
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .with_target(true);
 
-pub fn info(msg: impl AsRef<str>) {
-    append(&format!("INFO {}", msg.as_ref()));
-}
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(stdout_layer)
+                .with(file_layer)
+                .init();
 
-fn log_path() -> &'static PathBuf {
-    LOG_FILE.get_or_init(|| {
-        let proj = ProjectDirs::from("dev", "snapdash", "Snapdash")
-            .expect("cannot determine app data dir");
+            Some(guard)
+        }
+        Err(e) => {
+            // Subscriber is not installed - use stderr directly.
+            eprintln!("warning: file logging disabled: {e:#}");
 
-        let dir = proj.data_dir();
-        create_dir_all(dir).ok();
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(stdout_layer)
+                .init();
 
-        dir.join("debug.log")
-    })
-}
+            tracing::warn!(error = %e, "file logging disabled; stdout only");
 
-fn append(msg: &str) {
-    let path = log_path();
-
-    let now = std::time::SystemTime::now();
-    let ts = chrono::DateTime::<chrono::Local>::from(now);
-    let line = format!("{ts}  {msg}");
-
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "{line}");
+            None
+        }
     }
+}
+
+fn try_file_writer() -> anyhow::Result<(NonBlocking, WorkerGuard)> {
+    let log_path = log_path()?;
+
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("cannot create log dir {}", parent.display()))?;
+    }
+
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .with_context(|| format!("cannot open log file {}", log_path.display()))?;
+
+    let (non_blocking, guard) = tracing_appender::non_blocking(file);
+    Ok((non_blocking, guard))
+}
+
+fn log_path() -> anyhow::Result<PathBuf> {
+    let proj = ProjectDirs::from("dev", "snapdash", "Snapdash")
+        .context("cannot determine app data dir")?;
+    Ok(proj.data_dir().join("debug.log"))
 }

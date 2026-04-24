@@ -1,7 +1,6 @@
 use iced::overlay::menu;
-use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, stack, text, text_input,
-};
+use iced::widget::scrollable::{AutoScroll, Rail, Scroller, Status, Style};
+use iced::widget::{button, checkbox, column, container, pick_list, row, stack, text, text_input};
 use iced::{Background, Border, Element, Length};
 
 use crate::app::Message;
@@ -382,55 +381,7 @@ pub fn active_sensor_section(app: &crate::app::Snapdash, p: Palette) -> Element<
         col = col.push(row_el);
     }
 
-    let scroll = scrollable(col)
-        .height(Length::Fill)
-        .style(move |_: &iced::Theme, _| iced::widget::scrollable::Style {
-            container: iced::widget::container::Style {
-                background: Some(iced::Background::Color(p.card)),
-                border: Border {
-                    radius: 20.0.into(),
-                    width: 0.0,
-                    color: p.border,
-                },
-                text_color: Some(p.accent_dim),
-                ..Default::default()
-            },
-            vertical_rail: iced::widget::scrollable::Rail {
-                background: Some(iced::Background::Color(p.accent_tint)),
-                scroller: iced::widget::scrollable::Scroller {
-                    background: iced::Background::Color(p.accent),
-                    border: Border {
-                        color: p.accent_dim,
-                        width: 0.3,
-                        radius: 20.0.into(),
-                    },
-                },
-                border: Border {
-                    color: p.border,
-                    width: 0.3,
-                    radius: 20.0.into(),
-                },
-            },
-            horizontal_rail: iced::widget::scrollable::Rail {
-                background: Some(iced::Background::Color(p.accent_dim)),
-                scroller: iced::widget::scrollable::Scroller {
-                    background: iced::Background::Color(p.accent_dim),
-                    border: iced::Border::default(),
-                },
-                border: iced::Border::default(),
-            },
-            gap: None,
-            auto_scroll: iced::widget::scrollable::AutoScroll {
-                background: iced::Background::Color(p.accent_dim),
-                border: iced::Border::default(),
-                icon: p.bg,
-                shadow: iced::Shadow {
-                    ..Default::default()
-                },
-            },
-        });
-
-    scroll.into()
+    scrollable(col.into(), p).height(Length::Fill).into()
 }
 
 pub fn sensors_section(app: &crate::app::Snapdash, p: Palette) -> Element<'_, Message> {
@@ -481,55 +432,59 @@ pub fn sensors_section(app: &crate::app::Snapdash, p: Palette) -> Element<'_, Me
         col = col.push(row_el);
     }
 
-    let scroll = scrollable(col)
-        .height(Length::Fill)
-        .style(move |_: &iced::Theme, _| iced::widget::scrollable::Style {
-            container: iced::widget::container::Style {
-                background: Some(iced::Background::Color(p.card)),
-                border: Border {
-                    radius: 20.0.into(),
-                    width: 0.0,
-                    color: p.border,
-                },
-                text_color: Some(p.accent_dim),
+    scrollable(col.into(), p).height(Length::Fill).into()
+}
+
+pub fn scrollable<'a>(
+    content: Element<'a, Message>,
+    p: Palette,
+) -> iced::widget::Scrollable<'a, Message> {
+    iced::widget::scrollable(content).style(move |_theme, status| {
+        let is_interacting = matches!(
+            status,
+            Status::Hovered {
+                is_horizontal_scrollbar_hovered: true,
+                ..
+            } | Status::Hovered {
+                is_vertical_scrollbar_hovered: true,
+                ..
+            } | Status::Dragged { .. }
+        );
+
+        let scroller_color = if is_interacting {
+            p.accent_dim
+        } else {
+            p.border_hovered
+        };
+
+        let rail = Rail {
+            background: Some(iced::Background::Color(p.accent_tint)),
+            border: iced::Border {
+                radius: 4.0.into(),
                 ..Default::default()
             },
-            vertical_rail: iced::widget::scrollable::Rail {
-                background: Some(iced::Background::Color(p.accent_tint)),
-                scroller: iced::widget::scrollable::Scroller {
-                    background: iced::Background::Color(p.accent),
-                    border: Border {
-                        color: p.accent_dim,
-                        width: 0.3,
-                        radius: 20.0.into(),
-                    },
-                },
-                border: Border {
-                    color: p.border,
-                    width: 0.3,
-                    radius: 20.0.into(),
-                },
-            },
-            horizontal_rail: iced::widget::scrollable::Rail {
-                background: Some(iced::Background::Color(p.accent_dim)),
-                scroller: iced::widget::scrollable::Scroller {
-                    background: iced::Background::Color(p.accent_dim),
-                    border: iced::Border::default(),
-                },
-                border: iced::Border::default(),
-            },
-            gap: None,
-            auto_scroll: iced::widget::scrollable::AutoScroll {
-                background: iced::Background::Color(p.accent_dim),
-                border: iced::Border::default(),
-                icon: p.bg,
-                shadow: iced::Shadow {
+            scroller: Scroller {
+                background: iced::Background::Color(scroller_color),
+                border: iced::Border {
+                    radius: 4.0.into(),
                     ..Default::default()
                 },
             },
-        });
+        };
 
-    scroll.into()
+        Style {
+            container: iced::widget::container::Style::default(),
+            vertical_rail: rail,
+            horizontal_rail: rail,
+            gap: None,
+            auto_scroll: AutoScroll {
+                background: iced::Background::Color(p.accent_tint),
+                border: iced::Border::default(),
+                icon: p.text_body,
+                shadow: iced::Shadow::default(),
+            },
+        }
+    })
 }
 
 pub fn fieldset<'a>(

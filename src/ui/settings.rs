@@ -1,7 +1,7 @@
 #[cfg(feature = "diagnostics")]
 use iced::widget::checkbox;
 use iced::widget::{column, container, mouse_area, row};
-use iced::{Element, Length};
+use iced::{Element, Length, mouse};
 
 use crate::app::{Message, Snapdash, UpdateState};
 use crate::theme::metric;
@@ -53,12 +53,21 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
             },
         ),
         UpdateState::UpdateAvailable => dimmed(
-            '⟳',
+            '⤓',
             crate::theme::Palette {
                 text_dim: iced::Color::from_rgb8(255, 0, 0),
                 ..p
             },
         ),
+    };
+
+    let update_icon: Element<Message> = if snap.update_state == UpdateState::UpdateAvailable {
+        mouse_area(update_icon)
+            .on_press(Message::OpenReleaseNotes)
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into()
+    } else {
+        update_icon.into()
     };
 
     let version: Element<Message> = row![
@@ -133,6 +142,15 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
         p,
     );
 
+    let update_badge: Element<Message> = if snap.update_state == UpdateState::UpdateAvailable {
+        mouse_area(components::badge("Update Available", p))
+            .on_press(Message::OpenReleaseNotes)
+            .interaction(mouse::Interaction::Pointer)
+            .into()
+    } else {
+        iced::widget::space().width(0).height(0).into()
+    };
+
     let title_bar: Element<Message> = row![
         mouse_area(
             container(components::title("Snapdash Settings", p))
@@ -140,11 +158,7 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
                 .padding([4, 0])
         )
         .on_press(Message::StartDrag(id)),
-        if snap.update_state == UpdateState::UpdateAvailable {
-            components::badge("Update Available", p)
-        } else {
-            iced::widget::space().width(0).height(0).into()
-        },
+        update_badge,
         components::icon("✕", p, Some(Message::CloseWindow(id))),
     ]
     .spacing(metric::GAP)

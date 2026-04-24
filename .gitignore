@@ -1,6 +1,8 @@
 # Build artifacts
   /target/
   /dist/
+  .target/
+  .dist/
 
   # Editor / IDE
   /.vscode/
@@ -20,9 +22,12 @@
 
   # Local Claude Code state
   /.claude/
+  .claude/
 
   # Environment / secrets (defensive)
   .env
   .env.local
   *.pem
   *.key
+
+target/

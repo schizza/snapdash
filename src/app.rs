@@ -1,6 +1,7 @@
+use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
-use crate::{logger as log, update};
+use crate::update;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,7 @@ use crate::theme::ThemeKind;
 pub enum WindowKind {
     Settings,
     Entity { entity_id: String },
+    ReleaseNotes,
 }
 #[derive(Debug)]
 pub struct WindowState {
@@ -110,7 +112,10 @@ pub struct Snapdash {
 
     pub entity_search_query: String,
     pub debug_now: Instant,
+
     pub update_state: UpdateState,
+    pub latest_release: Option<update::GitHubRelease>,
+    pub release_notes_items: Vec<iced::widget::markdown::Item>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +123,8 @@ pub enum Message {
     Noop,
     OpenSettings,
     OpenEntity(String),
+    OpenReleaseNotes,
+    OpenUrl(String),
     CloseWindow(window::Id),
     QuitApp,
     WindowClosed(window::Id),
@@ -157,6 +164,12 @@ pub enum Message {
     LastVersionChecked(Option<update::GitHubRelease>),
 }
 
+impl Default for Snapdash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Snapdash {
     pub fn new() -> Self {
         Self {
@@ -178,6 +191,8 @@ impl Snapdash {
             entity_search_query: String::new(),
             debug_now: Instant::now(),
             update_state: UpdateState::Unknown,
+            latest_release: None,
+            release_notes_items: Vec::new(),
         }
     }
     pub fn boot() -> (Self, Task<Message>) {
@@ -403,21 +418,65 @@ impl Snapdash {
         }
     }
 
+    fn ha_error_status(error: &HaError) -> (String, LogType) {
+        match error {
+            HaError::AuthInvalid(msg) => {
+                (format!("Authentication rejected: {msg}"), LogType::Error)
+            }
+            HaError::AuthExhausted { attempts } => (
+                format!("Auth failed after {attempts} attempts - check your token"),
+                LogType::Error,
+            ),
+            HaError::Protocol(_) => (format!("HA protocol error: {error}"), LogType::Error),
+            HaError::Stale { elapsed } => (
+                format!(
+                    "HA connection stale ({}s), reconnecting...",
+                    elapsed.as_secs()
+                ),
+                LogType::Warn,
+            ),
+            HaError::Connect(_) => (format!("Cannoct reach HA: {error}"), LogType::Warn),
+            HaError::Timeout { what } => (
+                format!("HA timeout waiting for {what}, reconnecting..."),
+                LogType::Warn,
+            ),
+            HaError::SendFailed { what } => (
+                format!("Failed to send {what} to HA, reconnecting..."),
+                LogType::Warn,
+            ),
+            HaError::Closed => ("HA disconnected, reconnecting...".to_owned(), LogType::Info),
+        }
+    }
+
     fn handle_ha_event(&mut self, ev: HaEvent) {
         match ev {
             HaEvent::Connected => {
                 self.ha_connected = true;
                 self.set_status("HA Connected", LogType::Info);
             }
-            HaEvent::Disconnected(why) => {
+            HaEvent::Disconnected(error) => {
                 self.ha_connected = false;
-                self.set_status(format!("HA disconnected: {why}"), LogType::Warn);
+                let (msg, severity) = Snapdash::ha_error_status(&error);
+                self.set_status(msg, severity);
             }
             HaEvent::InitialState(states) => {
                 self.apply_initial_states(states);
             }
             HaEvent::StateChanged { new_state } => {
                 self.apply_entity_state(new_state);
+            }
+            HaEvent::AuthFailed(error) => {
+                self.ha_connected = false;
+                self.ha_connection = None;
+                self.config.ha_token_present = false;
+
+                let (msg, _) = Snapdash::ha_error_status(&error);
+                self.set_status(msg, LogType::Error);
+
+                let cfg = self.config.clone();
+                let _ = Task::perform(async move { cfg.save_async().await }, |_| {
+                    Message::SaveConfig
+                });
             }
         }
     }
@@ -426,9 +485,9 @@ impl Snapdash {
     pub fn set_status(&mut self, msg: impl Into<String>, error_type: LogType) {
         let msg = msg.into();
         match error_type {
-            LogType::Info => log::info(&msg),
-            LogType::Warn => log::warn(&msg),
-            LogType::Error => log::error(&msg),
+            LogType::Info => tracing::info!(target: "snapdash::status", "{msg}"),
+            LogType::Warn => tracing::warn!(target: "snapdash::status", "{msg}"),
+            LogType::Error => tracing::error!(target: "snapdash::status", "{msg}"),
             LogType::DoNotLog => (),
         }
         self.status = msg;
@@ -487,7 +546,7 @@ impl Snapdash {
                         self.config.ha_token_present = false;
                         self.ha_connection = None;
                         self.ha_connected = false;
-                        log::warn("HA disconnected due to erased token.");
+                        tracing::warn!("HA disconected due to erased token.");
                     }
                     Err(s) => {
                         self.set_status(s, LogType::Error);
@@ -807,13 +866,42 @@ impl Snapdash {
             }
 
             Message::LastVersionChecked(release) => {
-                if release.is_some() {
+                if let Some(release) = release {
                     self.update_state = UpdateState::UpdateAvailable;
-                    Task::none()
+                    self.release_notes_items =
+                        iced::widget::markdown::parse(&release.body).collect();
+                    self.latest_release = Some(release);
                 } else {
                     self.update_state = UpdateState::UptoDate;
-                    Task::none()
+                    self.latest_release = None;
+                    self.release_notes_items.clear();
                 }
+                Task::none()
+            }
+            Message::OpenReleaseNotes => {
+                if let Some(opened) =
+                    Snapdash::find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
+                {
+                    return iced::window::gain_focus::<Message>(opened);
+                }
+
+                self.pending_opens.push_back(WindowKind::ReleaseNotes);
+                let settings = window::Settings {
+                    size: crate::ui::platform::window_size(560.0, 640.0),
+                    resizable: true,
+                    decorations: false,
+                    transparent: true,
+                    ..window::Settings::default()
+                };
+
+                let (_id, task_id) = window::open(settings);
+                task_id.map(Message::WindowActuallyOpened)
+            }
+            Message::OpenUrl(url) => {
+                if let Err(e) = open::that(&url) {
+                    tracing::warn!(url, error = %e, "failed to open URL");
+                }
+                Task::none()
             }
         }
     }
@@ -832,6 +920,7 @@ impl Snapdash {
                 crate::ui::chrome::with_mouse_area(with_gear, id, win)
             }
             WindowKind::Settings => inner,
+            WindowKind::ReleaseNotes => inner,
         };
 
         // Platform-specific outer wrapping:

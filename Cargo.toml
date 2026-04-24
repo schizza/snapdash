@@ -1,6 +1,6 @@
 [package]
 name = "snapdash"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 authors = ["Lukáš Svoboda <opensource@schizza.cz>"]
 license = "Apache-2.0"
@@ -14,16 +14,16 @@ categories = ["gui", "visualization", "rendering"]
 rust-version = "1.94"
 
 exclude = [
-  "/.github/",
-  "/.vscode/",
-  "/.zed/",
-  "/.claude/",
-  "/dist/",
-  "/assets/screenshots/",
-  "*.png",
-  "*.gif",
-  ".DS_Store",
-  "mac_build.sh",
+    "/.github/",
+    "/.vscode/",
+    "/.zed/",
+    "/.claude/",
+    "/dist/",
+    "/assets/screenshots/",
+    "*.png",
+    "*.gif",
+    ".DS_Store",
+    "mac_build.sh",
 ]
 
 [features]
@@ -31,23 +31,36 @@ default = ["diagnostics"]
 diagnostics = []
 
 [dependencies]
-anyhow = "1.0.100"
-chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
-iced = { version = "0.14.0", features = ["wgpu", "tokio"] }
+anyhow = "1.0.102"
+chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
+iced = { version = "0.14.0", features = ["wgpu", "tokio", "markdown"] }
 directories = "6.0.0"
+thiserror = "2.0.18"
 
 reqwest = { version = "0.13.2", default-features = false, features = [
-  "json",
-  "rustls",
-  "http2",
+    "json",
+    "rustls",
+    "http2",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = { version = "1.48.0", features = ["rt-multi-thread", "time", "fs"] }
+tokio = { version = "1.52.1", features = [
+    "macros",
+    "rt-multi-thread",
+    "time",
+    "fs",
+] }
 tokio-tungstenite = { version = "0.29.0", features = [
-  "rustls-tls-webpki-roots",
+    "rustls-tls-webpki-roots",
 ] }
 toml = "1.1.2"
+url = "2.5.8"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-appender = "0.2.5"
+rand = "0.10.1"
+open = "5.3.4"
+
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", features = ["apple-native"] }

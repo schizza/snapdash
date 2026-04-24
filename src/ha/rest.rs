@@ -1,7 +1,7 @@
 use crate::ha::types::EntityState;
 
-pub async fn fetch_all_states(ha_url: String, token: String) -> Vec<EntityState> {
-    let base = ha_url.trim_end_matches("/");
+pub async fn fetch_all_states(ha_url: &str, token: &str) -> Vec<EntityState> {
+    let base = ha_url.trim_end_matches('/');
 
     let client = reqwest::Client::new();
 

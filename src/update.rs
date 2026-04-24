@@ -4,8 +4,12 @@ pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct GitHubRelease {
-    tag_name: String,
-    // html_url: String,   //intentionaly left here for future useage.
+    pub tag_name: String,
+    #[serde(default)]
+    pub body: String,
+
+    #[serde(default)]
+    pub html_url: String, //intentionaly left here for future useage.
 }
 
 pub async fn get_latest_version() -> Option<GitHubRelease> {
