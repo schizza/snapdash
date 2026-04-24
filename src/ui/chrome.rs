@@ -23,6 +23,7 @@ pub fn window_content<'a>(
             app.ha_connected,
             app.update_state == UpdateState::UpdateAvailable,
         ),
+        WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
     }
 }
 
@@ -159,5 +160,6 @@ pub fn with_mouse_area<'a>(
     match win.kind {
         WindowKind::Entity { .. } => ma.on_press(Message::StartDrag(id)).into(),
         WindowKind::Settings => ma.into(),
+        WindowKind::ReleaseNotes => ma.into(),
     }
 }
