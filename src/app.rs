@@ -16,6 +16,7 @@ use crate::theme::ThemeKind;
 pub enum WindowKind {
     Settings,
     Entity { entity_id: String },
+    ReleaseNotes,
 }
 #[derive(Debug)]
 pub struct WindowState {
@@ -111,7 +112,10 @@ pub struct Snapdash {
 
     pub entity_search_query: String,
     pub debug_now: Instant,
+
     pub update_state: UpdateState,
+    pub latest_release: Option<update::GitHubRelease>,
+    pub release_notes_items: Vec<iced::widget::markdown::Item>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +123,8 @@ pub enum Message {
     Noop,
     OpenSettings,
     OpenEntity(String),
+    OpenReleaseNotes,
+    OpenUrl(String),
     CloseWindow(window::Id),
     QuitApp,
     WindowClosed(window::Id),
@@ -185,6 +191,8 @@ impl Snapdash {
             entity_search_query: String::new(),
             debug_now: Instant::now(),
             update_state: UpdateState::Unknown,
+            latest_release: None,
+            release_notes_items: Vec::new(),
         }
     }
     pub fn boot() -> (Self, Task<Message>) {
@@ -858,13 +866,42 @@ impl Snapdash {
             }
 
             Message::LastVersionChecked(release) => {
-                if release.is_some() {
+                if let Some(release) = release {
                     self.update_state = UpdateState::UpdateAvailable;
-                    Task::none()
+                    self.release_notes_items =
+                        iced::widget::markdown::parse(&release.body).collect();
+                    self.latest_release = Some(release);
                 } else {
                     self.update_state = UpdateState::UptoDate;
-                    Task::none()
+                    self.latest_release = None;
+                    self.release_notes_items.clear();
                 }
+                Task::none()
+            }
+            Message::OpenReleaseNotes => {
+                if let Some(opened) =
+                    Snapdash::find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
+                {
+                    return iced::window::gain_focus::<Message>(opened);
+                }
+
+                self.pending_opens.push_back(WindowKind::ReleaseNotes);
+                let settings = window::Settings {
+                    size: crate::ui::platform::window_size(560.0, 640.0),
+                    resizable: true,
+                    decorations: false,
+                    transparent: true,
+                    ..window::Settings::default()
+                };
+
+                let (_id, task_id) = window::open(settings);
+                task_id.map(Message::WindowActuallyOpened)
+            }
+            Message::OpenUrl(url) => {
+                if let Err(e) = open::that(&url) {
+                    tracing::warn!(url, error = %e, "failed to open URL");
+                }
+                Task::none()
             }
         }
     }
@@ -883,6 +920,7 @@ impl Snapdash {
                 crate::ui::chrome::with_mouse_area(with_gear, id, win)
             }
             WindowKind::Settings => inner,
+            WindowKind::ReleaseNotes => inner,
         };
 
         // Platform-specific outer wrapping:

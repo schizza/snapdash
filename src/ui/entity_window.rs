@@ -1,4 +1,4 @@
-use iced::widget::{column, row, space, text};
+use iced::widget::{column, mouse_area, row, space, text};
 use iced::{Alignment, Element, Length};
 
 use super::components;
@@ -65,16 +65,19 @@ pub fn view(
 ) -> Element<'_, Message> {
     let (friendly, main_opt, detail) = format_main_value(state);
 
-    let update_icon = if update {
-        components::dimmed(
-            '⟳',
+    let update_icon: Element<Message> = if update {
+        mouse_area(components::dimmed(
+            '⤓',
             crate::theme::Palette {
                 text_dim: iced::Color::from_rgb8(255, 0, 0),
                 ..p
             },
-        )
+        ))
+        .on_press(Message::OpenReleaseNotes)
+        .interaction(iced::mouse::Interaction::Pointer)
+        .into()
     } else {
-        components::dimmed("", p)
+        components::dimmed("", p).into()
     };
     let title_text = if let Some(name) = friendly {
         row![
