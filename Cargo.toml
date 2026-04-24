@@ -31,8 +31,8 @@ default = ["diagnostics"]
 diagnostics = []
 
 [dependencies]
-anyhow = "1.0.100"
-chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
+anyhow = "1.0.102"
+chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
 iced = { version = "0.14.0", features = ["wgpu", "tokio", "markdown"] }
 directories = "6.0.0"
 thiserror = "2.0.18"
@@ -44,7 +44,7 @@ reqwest = { version = "0.13.2", default-features = false, features = [
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = { version = "1.48.0", features = [
+tokio = { version = "1.52.1", features = [
     "macros",
     "rt-multi-thread",
     "time",

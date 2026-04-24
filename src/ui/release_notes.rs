@@ -8,20 +8,14 @@ use crate::ui::components;
 pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     let p = snap.theme.palette();
 
-    let Some(release) = &snap.latest_release else {
-        return components::card(
-            container(components::dimmed("No update available", p))
-                .center(Length::Fill)
-                .into(),
-            p,
-        );
+    let title_text = match &snap.latest_release {
+        Some(r) => format!("Update to {}", r.tag_name),
+        None => "Release notes".to_owned(),
     };
 
-    let title_widget = text(format!("Latest version is {}", release.tag_name))
-        .size(18)
-        .style(move |_| text::Style {
-            color: Some(p.text_primary),
-        });
+    let title_widget = text(title_text).size(18).style(move |_| text::Style {
+        color: Some(p.text_primary),
+    });
 
     let title_bar: Element<Message> = row![
         mouse_area(container(title_widget).width(Length::Fill).padding([4, 0]))
@@ -30,6 +24,15 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     ]
     .align_y(Alignment::Center)
     .into();
+
+    let Some(release) = &snap.latest_release else {
+        let body: Element<Message> = container(components::dimmed("No update available", p))
+            .center(Length::Fill)
+            .height(Length::Fill)
+            .into();
+
+        return components::card(column![title_bar, body].spacing(metric::GAP).into(), p);
+    };
 
     let version_line: Element<Message> = components::dimmed(
         format!(

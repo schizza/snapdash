@@ -381,7 +381,7 @@ pub fn active_sensor_section(app: &crate::app::Snapdash, p: Palette) -> Element<
         col = col.push(row_el);
     }
 
-    scrollable(col.into(), p).into()
+    scrollable(col.into(), p).height(Length::Fill).into()
 }
 
 pub fn sensors_section(app: &crate::app::Snapdash, p: Palette) -> Element<'_, Message> {
