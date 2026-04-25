@@ -448,22 +448,26 @@ impl Snapdash {
         }
     }
 
-    fn handle_ha_event(&mut self, ev: HaEvent) {
+    fn handle_ha_event(&mut self, ev: HaEvent) -> Task<Message> {
         match ev {
             HaEvent::Connected => {
                 self.ha_connected = true;
                 self.set_status("HA Connected", LogType::Info);
+                Task::none()
             }
             HaEvent::Disconnected(error) => {
                 self.ha_connected = false;
                 let (msg, severity) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, severity);
+                Task::none()
             }
             HaEvent::InitialState(states) => {
                 self.apply_initial_states(states);
+                Task::none()
             }
             HaEvent::StateChanged { new_state } => {
                 self.apply_entity_state(new_state);
+                Task::none()
             }
             HaEvent::AuthFailed(error) => {
                 self.ha_connected = false;
@@ -474,9 +478,9 @@ impl Snapdash {
                 self.set_status(msg, LogType::Error);
 
                 let cfg = self.config.clone();
-                let _ = Task::perform(async move { cfg.save_async().await }, |_| {
+                Task::perform(async move { cfg.save_async().await }, |_| {
                     Message::SaveConfig
-                });
+                })
             }
         }
     }
@@ -832,10 +836,7 @@ impl Snapdash {
                 Task::none()
             }
 
-            Message::HaEvent(ev) => {
-                self.handle_ha_event(ev);
-                Task::none()
-            }
+            Message::HaEvent(ev) => self.handle_ha_event(ev),
 
             Message::FocusMove {
                 window_id,
