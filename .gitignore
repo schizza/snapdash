@@ -31,3 +31,4 @@
   *.key
 
 target/
+dist/
