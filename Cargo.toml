@@ -69,7 +69,10 @@ keyring = { version = "3.6.3", features = ["apple-native"] }
 keyring = { version = "3.6.3", features = ["windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3.6.3", features = ["sync-secret-service", "vendored"] }
+keyring = { version = "3.6.3", features = [
+    "sync-secret-service",
+    "crypto-rust",
+] }
 
 [patch.crates-io]
 iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
