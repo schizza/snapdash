@@ -7,7 +7,8 @@
 //!
 //! See `super` module doc for the high-level approach.
 
-use iced::{Element, Length};
+use iced::window::settings::PlatformSpecific;
+use iced::{Element, Length, window};
 
 use crate::app::Message;
 
@@ -44,4 +45,19 @@ pub fn wrap_outer<'a>(inner: Element<'a, Message>) -> Element<'a, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+pub fn window_settings(size: iced::Size, resizable: bool) -> window::Settings {
+    window::Settings {
+        size: window_size(size.width, size.height),
+        resizable,
+        decorations: false,
+        transparent: true,
+        platform_specific: build_platform_specific(),
+        ..window::Settings::default()
+    }
+}
+
+fn build_platform_specific() -> PlatformSpecific {
+    PlatformSpecific::default()
 }

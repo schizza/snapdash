@@ -1,6 +1,7 @@
 use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
+use crate::ui::platform::window_settings;
 use crate::update;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
@@ -731,14 +732,7 @@ impl Snapdash {
                 // Linux (where we render our own shader shadow) and is a
                 // no-op on macOS/Windows (where the OS clips + draws its
                 // own shadow). See `ui::platform` module doc.
-                let settings = window::Settings {
-                    size: crate::ui::platform::window_size(820.0, 950.0),
-                    resizable: false,
-                    decorations: false,
-                    transparent: true,
-                    ..window::Settings::default()
-                };
-
+                let settings = window_settings(iced::Size::new(820.0, 950.0), false);
                 let (_id, task_id) = window::open(settings);
                 task_id.map(Message::WindowActuallyOpened)
             }
@@ -757,14 +751,7 @@ impl Snapdash {
 
                 // Platform helper: adds shadow margin on Linux, pass-through
                 // on macOS/Windows. See `ui::platform` module doc.
-                let win_settings = window::Settings {
-                    size: crate::ui::platform::window_size(240.0, 160.0),
-                    resizable: false,
-                    decorations: false,
-                    transparent: true,
-                    ..Default::default()
-                };
-
+                let win_settings = window_settings(iced::Size::new(240.0, 160.0), false);
                 let mut task = Vec::new();
 
                 for widget in widgets {
@@ -888,14 +875,7 @@ impl Snapdash {
                 }
 
                 self.pending_opens.push_back(WindowKind::ReleaseNotes);
-                let settings = window::Settings {
-                    size: crate::ui::platform::window_size(560.0, 640.0),
-                    resizable: true,
-                    decorations: false,
-                    transparent: true,
-                    ..window::Settings::default()
-                };
-
+                let settings = window_settings(iced::Size::new(560.0, 640.0), false);
                 let (_id, task_id) = window::open(settings);
                 task_id.map(Message::WindowActuallyOpened)
             }
@@ -942,7 +922,7 @@ impl Snapdash {
     /// any cleared pixel is visible, so the default opaque theme background
     /// is never seen and matches the pre-shadow-margin behavior users
     /// reported looked "nice and optimal".
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     pub fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
         iced::theme::Style {
             background_color: iced::Color::TRANSPARENT,

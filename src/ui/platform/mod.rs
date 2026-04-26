@@ -27,12 +27,12 @@
 //! Both branches expose the same small API ([`window_size`], [`wrap_outer`])
 //! so `app.rs` stays platform-agnostic at the call sites.
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "linux")]
 mod composited;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub use composited::*;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod macos;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use macos::*;
