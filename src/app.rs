@@ -603,6 +603,7 @@ impl Snapdash {
             Message::QuitApp => iced::exit(),
 
             Message::EntityHover { window, on } => {
+                tracing::debug!(?window, on, "cursor hover changed");
                 if let Some(w) = self.windows.get_mut(&window) {
                     w.entity.hovered = on;
                 }
