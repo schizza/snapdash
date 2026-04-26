@@ -33,21 +33,27 @@ pub fn with_gear_overlay<'a>(
     inner: Element<'a, Message>,
     win: &WindowState,
 ) -> Element<'a, Message> {
+    // Conditional rendering: when not hovered, gear is not part of the
+    // widget tree at all. Avoids relying on alpha-0 transparency, which
+    // doesn't actually hide the widget on Windows wgpu pipeline (state +
+    // re-render are correct, alpha=0.0 reaches the renderer, but the
+    // glyph still rasterizes visibly — likely a blend-mode quirk for
+    // text-on-transparent-surface).
+
+    if !win.entity.hovered {
+        return inner;
+    }
+
     let ui_theme = UiTheme::from(&app.theme);
-    let a = if win.entity.hovered { 1.0 } else { 0.0 };
 
     let gear_icon = iced::widget::text("⚙")
         .size(28)
-        .style(icon_text(ui_theme, a));
+        .style(icon_text(ui_theme, 1.0));
 
     let gear_button = iced::widget::button(gear_icon)
         .padding(8)
-        .on_press_maybe(if a > 0.0 {
-            Some(Message::OpenSettings)
-        } else {
-            None
-        })
-        .style(icon_button(ui_theme, a));
+        .on_press(Message::OpenSettings)
+        .style(icon_button(ui_theme, 1.0));
 
     let gear_layer: Element<Message> = iced::widget::container(gear_button)
         .width(Length::Fill)
