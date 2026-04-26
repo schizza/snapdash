@@ -1,4 +1,11 @@
-//! Linux platform bits. See `super` module doc for the big picture.
+//! Composited shadow rendering for Linux + Windows.
+//!
+//! Both platforms render their own anti-aliased rounded corners + drop
+//! shadow inside the window via the iced-wgpu shader, since the OS-level
+//! mechanisms either don't exist (Linux compositors) or produce jagged
+//! 1-bit results (Windows `SetWindowRgn`).
+//!
+//! See `super` module doc for the high-level approach.
 
 use iced::{Element, Length};
 

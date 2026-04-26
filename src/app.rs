@@ -941,7 +941,7 @@ impl Snapdash {
     /// any cleared pixel is visible, so the default opaque theme background
     /// is never seen and matches the pre-shadow-margin behavior users
     /// reported looked "nice and optimal".
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     pub fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
         iced::theme::Style {
             background_color: iced::Color::TRANSPARENT,
