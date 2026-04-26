@@ -53,7 +53,7 @@ install-mac: build-mac
 
 run-mac: build-mac
 	@RUST_LOG="$(LOG_DEBUG)" "$(MAC_BUNDLE_BIN)"
-	
+
 # ====== Linux ======
 .PHONY: build-linux install-linux run-linux
 
@@ -74,7 +74,7 @@ install-linux: build-linux
 
 run-linux:
 	@RUST_LOG="$(LOG_DEBUG)" cargo run --release
-	
+
 # ====== Windows (native build Windows Git-Bash/MSYS) ======
 .PHONY: build-windows install-windows run-windows
 
@@ -186,7 +186,7 @@ help:
 
 # ====== Build & check ======
 check:
-	@cargo check
+	@cargo check --all-targets --all-features
 
 build:
 	@cargo build
