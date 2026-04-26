@@ -8,7 +8,7 @@
 //! See `super` module doc for the high-level approach.
 
 use iced::window::settings::PlatformSpecific;
-use iced::{Element, Length};
+use iced::{Element, Length, window};
 
 use crate::app::Message;
 
@@ -59,5 +59,5 @@ pub fn window_settings(size: iced::Size, resizable: bool) -> window::Settings {
 }
 
 fn build_platform_specific() -> PlatformSpecific {
-    { PlatformSpecific::default() }
+    PlatformSpecific::default()
 }
