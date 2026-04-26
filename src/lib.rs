@@ -29,7 +29,7 @@ pub fn run() -> iced::Result {
     )
     .subscription(app::Snapdash::subscription);
 
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     let builder = builder.style(app::Snapdash::style);
 
     builder.run()
