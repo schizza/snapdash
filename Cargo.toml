@@ -1,6 +1,6 @@
 [package]
 name = "snapdash"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 authors = ["Lukáš Svoboda <opensource@schizza.cz>"]
 license = "Apache-2.0"
@@ -75,13 +75,13 @@ keyring = { version = "3.6.3", features = [
 ] }
 
 [patch.crates-io]
-iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
-iced_winit = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
-iced_runtime = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
-iced_program = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
-iced_renderer = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
-iced_widget = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
-iced_core = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p5" }
+iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }
+iced_winit = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }
+iced_runtime = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }
+iced_program = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }
+iced_renderer = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }
+iced_widget = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }
+iced_core = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }
 
 [profile.release]
 opt-level = "z"

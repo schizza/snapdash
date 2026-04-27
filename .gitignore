@@ -1,34 +1,34 @@
 # Build artifacts
-  /target/
-  /dist/
-  .target/
-  .dist/
+/target/
+/dist/
+.target/
+.dist/
 
-  # Editor / IDE
-  /.vscode/
-  /.zed/
-  /.idea/
-  *.swp
-  *.swo
+# Editor / IDE
+/.vscode/
+/.zed/
+/.idea/
+*.swp
+*.swo
 
-  # OS metadata
-  .DS_Store
-  Thumbs.db
-  desktop.ini
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
 
-  # Runtime / debug
-  .coverage
-  *.log
+# Runtime / debug
+.coverage
+*.log
 
   # Local Claude Code state
-  /.claude/
-  .claude/
+/.claude/
+.claude/
 
   # Environment / secrets (defensive)
-  .env
-  .env.local
-  *.pem
-  *.key
+.env
+.env.local
+*.pem
+*.key
 
 target/
 dist/

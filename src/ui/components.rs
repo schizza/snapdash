@@ -14,11 +14,45 @@ pub fn card(content: Element<Message>, p: Palette) -> Element<Message> {
         .style(move |_| container::Style {
             background: Some(Background::Color(p.card)),
             border: Border {
-                radius: metric::RADIUS.into(),
-                width: 1.0,
+                radius: {
+                    // On Windows the OS (DWM) renders rounded corners on
+                    // the window outer edge. Our container fills the window,
+                    // so a non-zero inner radius would create a visible
+                    // double-round artifact (8px DWM + N px inner).
+                    // Use 0 inner radius and let DWM handle rounding.
+                    #[cfg(target_os = "windows")]
+                    {
+                        iced::border::Radius::from(0.0)
+                    }
+
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        metric::RADIUS.into()
+                    }
+                },
+                width: {
+                    #[cfg(target_os = "windows")]
+                    {
+                        0.0
+                    } // DWM clip handles the visible edge
+
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        1.0
+                    }
+                },
                 color: p.border,
             },
-            shadow: p.shadow,
+            shadow: {
+                #[cfg(target_os = "windows")]
+                {
+                    iced::Shadow::default()
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    p.shadow
+                }
+            },
             ..Default::default()
         })
         .into()
@@ -296,11 +330,37 @@ pub fn card_with_border(
         .style(move |_theme| container::Style {
             background: Some(Background::Color(p.card)),
             border: Border {
-                radius: metric::RADIUS.into(),
+                radius: {
+                    // Windows: DWM rounds the outer window; inner radius
+                    // would create double-round artifact. Border line is
+                    // still drawn (animated alpha) and gets pixel-clipped
+                    // by DWM at the corners — so visually we still get
+                    // rounded edges on the border highlight, just from
+                    // the OS rather than from our shader.
+                    #[cfg(target_os = "windows")]
+                    {
+                        iced::border::Radius::from(0.0)
+                    }
+
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        metric::RADIUS.into()
+                    }
+                },
                 width: border_width,
                 color: border_color,
             },
-            shadow: p.shadow,
+            shadow: {
+                #[cfg(target_os = "windows")]
+                {
+                    iced::Shadow::default()
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    p.shadow
+                }
+            },
             ..Default::default()
         })
         .width(Length::Fill)
