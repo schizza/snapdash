@@ -4,7 +4,7 @@ use crate::logger::LogType;
 use crate::ui::platform::window_settings;
 use crate::update;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use iced::{Element, Task};
 use iced::{Subscription, window};
@@ -23,7 +23,6 @@ pub enum WindowKind {
 pub struct WindowState {
     pub kind: WindowKind,
     pub entity: EntityWindowState,
-    pub debug: WindowDebugState,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -32,40 +31,6 @@ pub struct EntityWindowState {
     pub last: Option<EntityState>,
     pub pulse: f32, // TODO: Replace with Animation/spring. Currently just easy "animation paramter" (0..1), později nahradit Animation/spring
     pub hovered: bool,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct WindowDebugState {
-    pub redraw_total: u64,
-    pub redraws_last_second: usize,
-    pub last_redraw_at: Option<Instant>,
-    pub last_redraw_delta_ms: Option<f32>,
-    recent_redraws: VecDeque<Instant>,
-}
-
-impl WindowDebugState {
-    fn record_redraw(&mut self, now: Instant) {
-        if let Some(previous) = self.last_redraw_at {
-            self.last_redraw_delta_ms =
-                Some(now.saturating_duration_since(previous).as_secs_f32() * 1000.0);
-        }
-
-        self.last_redraw_at = Some(now);
-        self.redraw_total = self.redraw_total.saturating_add(1);
-        self.recent_redraws.push_back(now);
-        self.prune(now);
-    }
-
-    fn prune(&mut self, now: Instant) {
-        while matches!(
-            self.recent_redraws.front(),
-            Some(at) if now.saturating_duration_since(*at) > Duration::from_secs(1)
-        ) {
-            self.recent_redraws.pop_front();
-        }
-
-        self.redraws_last_second = self.recent_redraws.len();
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -112,7 +77,6 @@ pub struct Snapdash {
     pub active_settings_sensors: Vec<SettingsSensor>,
 
     pub entity_search_query: String,
-    pub debug_now: Instant,
 
     pub update_state: UpdateState,
     pub latest_release: Option<update::GitHubRelease>,
@@ -135,8 +99,6 @@ pub enum Message {
     ThemeSelected(ThemeKind),
     SaveConfig,
     ToggleWidget(String),
-    #[cfg(feature = "diagnostics")]
-    DebugOverlayToggled(bool),
 
     // Home Assistant
     ConnectHa,
@@ -152,7 +114,7 @@ pub enum Message {
     SavePressed,
     Saved,
     HaTokenDraftChanged(String),
-    WindowRedraw(window::Id, Instant),
+    WindowRedraw(window::Id),
     ConfigLoad(Result<Config, String>),
     StartDrag(window::Id),
     EntityHover {
@@ -190,7 +152,6 @@ impl Snapdash {
             selected_widgets: HashSet::new(),
             active_settings_sensors: Vec::new(),
             entity_search_query: String::new(),
-            debug_now: Instant::now(),
             update_state: UpdateState::Unknown,
             latest_release: None,
             release_notes_items: Vec::new(),
@@ -263,22 +224,12 @@ impl Snapdash {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let redraw_events_needed = {
-            #[cfg(feature = "diagnostics")]
-            {
-                self.config.debug_overlay || self.windows.values().any(|win| win.entity.pulse > 0.0)
-            }
-
-            #[cfg(not(feature = "diagnostics"))]
-            {
-                self.windows.values().any(|win| win.entity.pulse > 0.0)
-            }
-        };
+        let redraw_events_needed = self.windows.values().any(|win| win.entity.pulse > 0.0);
 
         let redraw_events = if redraw_events_needed {
             iced::event::listen_raw(|event, _status, id| match event {
-                iced::Event::Window(window::Event::RedrawRequested(now)) => {
-                    Some(Message::WindowRedraw(id, now))
+                iced::Event::Window(window::Event::RedrawRequested(_)) => {
+                    Some(Message::WindowRedraw(id))
                 }
                 _ => None,
             })
@@ -326,39 +277,15 @@ impl Snapdash {
         ])
     }
 
-    fn handle_redraw_requested(&mut self, id: window::Id, now: Instant) {
-        self.debug_now = now;
-
+    fn handle_redraw_requested(&mut self, id: window::Id) {
         let Some(window) = self.windows.get_mut(&id) else {
             return;
         };
-
-        window.debug.record_redraw(now);
 
         if let WindowKind::Entity { .. } = window.kind
             && window.entity.pulse > 0.0
         {
             window.entity.pulse = (window.entity.pulse - 0.08).max(0.0);
-        }
-    }
-
-    #[cfg(feature = "diagnostics")]
-    fn seed_debug_overlay(&mut self, now: Instant) {
-        self.debug_now = now;
-
-        for window in self.windows.values_mut() {
-            // Treat enabling diagnostics as the first visible redraw so static
-            // windows do not stay stuck at zero until some unrelated repaint.
-            window.debug.record_redraw(now);
-        }
-    }
-
-    #[cfg(feature = "diagnostics")]
-    fn seed_debug_window(&mut self, id: window::Id, now: Instant) {
-        self.debug_now = now;
-
-        if let Some(window) = self.windows.get_mut(&id) {
-            window.debug.record_redraw(now);
         }
     }
 
@@ -531,19 +458,6 @@ impl Snapdash {
                 Task::none()
             }
 
-            #[cfg(feature = "diagnostics")]
-            Message::DebugOverlayToggled(enabled) => {
-                self.config.debug_overlay = enabled;
-                if enabled {
-                    self.seed_debug_overlay(Instant::now());
-                }
-                let cfg = self.config.clone();
-
-                Task::perform(async move { cfg.save_async().await }, |_| {
-                    Message::SaveConfig
-                })
-            }
-
             Message::HaTokenDelete => {
                 match secrets::delete_ha_token() {
                     Ok(_) => {
@@ -604,7 +518,6 @@ impl Snapdash {
             Message::QuitApp => iced::exit(),
 
             Message::EntityHover { window, on } => {
-                tracing::debug!(?window, on, "cursor hover changed");
                 if let Some(w) = self.windows.get_mut(&window) {
                     w.entity.hovered = on;
                 }
@@ -653,18 +566,7 @@ impl Snapdash {
                         }
                         self.entity_windows.insert(entity_id.clone(), id);
                     }
-                    self.windows.insert(
-                        id,
-                        WindowState {
-                            kind,
-                            entity,
-                            debug: WindowDebugState::default(),
-                        },
-                    );
-                    #[cfg(feature = "diagnostics")]
-                    if self.config.debug_overlay {
-                        self.seed_debug_window(id, Instant::now());
-                    }
+                    self.windows.insert(id, WindowState { kind, entity });
                 } else {
                     self.set_status(
                         "Received WindowActuallyOpened but pending_opens is empty",
@@ -777,9 +679,11 @@ impl Snapdash {
                 self.theme = t;
                 self.config.theme = t;
                 let cfg = self.config.clone();
-                Task::perform(async move { cfg.save_async().await }, |_| {
+                let save = Task::perform(async move { cfg.save_async().await }, |_| {
                     Message::SaveConfig
-                })
+                });
+
+                Task::batch([save])
             }
 
             Message::SaveConfig => Task::none(),
@@ -845,8 +749,8 @@ impl Snapdash {
                 }
             }
 
-            Message::WindowRedraw(id, now) => {
-                self.handle_redraw_requested(id, now);
+            Message::WindowRedraw(id) => {
+                self.handle_redraw_requested(id);
                 Task::none()
             }
 
@@ -894,7 +798,6 @@ impl Snapdash {
         };
 
         let inner = crate::ui::chrome::window_content(self, win, id);
-        let inner = crate::ui::chrome::with_debug_overlay(self, inner, win);
 
         let inner = match win.kind {
             WindowKind::Entity { .. } => {
@@ -908,7 +811,7 @@ impl Snapdash {
         // Platform-specific outer wrapping:
         // - Linux: transparent `SHADOW_MARGIN` padding around the card so
         //   the iced-wgpu shader shadow has room to fade inside the surface.
-        // - macOS/Windows: pass-through. The OS hack in iced_winit clips the
+        // - macOS/Windows: pass-through. Platform-specific window settings clip the
         //   window to a rounded shape and the OS draws the drop shadow.
         crate::ui::platform::wrap_outer(inner)
     }
@@ -918,10 +821,10 @@ impl Snapdash {
     /// (the default theme background would show as an opaque color there).
     ///
     /// On macOS/Windows we intentionally do NOT install this callback (see
-    /// `main.rs`) — the OS hack clips the window to a rounded shape before
-    /// any cleared pixel is visible, so the default opaque theme background
-    /// is never seen and matches the pre-shadow-margin behavior users
-    /// reported looked "nice and optimal".
+    /// `main.rs`) — the OS-level rounded-corner/shadow path clips the window to
+    /// a rounded shape before any cleared pixel is visible, so the default
+    /// opaque theme background is never seen and matches the pre-shadow-margin
+    /// behavior users reported looked "nice and optimal".
     #[cfg(target_os = "linux")]
     pub fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
         iced::theme::Style {

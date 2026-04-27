@@ -1,10 +1,7 @@
 use iced::widget::{MouseArea, mouse_area};
-#[cfg(feature = "diagnostics")]
-use iced::widget::{column, container, text};
+
 use iced::window;
 use iced::{Alignment, Element, Length};
-#[cfg(feature = "diagnostics")]
-use iced::{Background, Border};
 
 use crate::app::{Message, UpdateState, WindowKind, WindowState};
 use crate::ui::theme::{UiTheme, icon_button, icon_text};
@@ -64,87 +61,6 @@ pub fn with_gear_overlay<'a>(
         .into();
 
     iced::widget::stack![inner, gear_layer].into()
-}
-
-#[cfg(feature = "diagnostics")]
-pub fn with_debug_overlay<'a>(
-    app: &crate::app::Snapdash,
-    inner: Element<'a, Message>,
-    win: &WindowState,
-) -> Element<'a, Message> {
-    if !app.config.debug_overlay {
-        return inner;
-    }
-    let p = app.theme.palette();
-    let last_delta = win
-        .debug
-        .last_redraw_delta_ms
-        .map(|ms| format!("{ms:.1} ms"))
-        .unwrap_or_else(|| "-".into());
-
-    let overlay_card: Element<Message> = container(
-        column![
-            text("debug")
-                .size(11)
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(p.text_dim),
-                }),
-            text(format!("fps ~ {}", win.debug.redraws_last_second))
-                .size(12)
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(p.text_primary),
-                },),
-            text(format!("redraws {}", win.debug.redraw_total))
-                .size(12)
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(p.text_primary),
-                },),
-            text(format!("last delta {last_delta}"))
-                .size(12)
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(p.text_primary),
-                },),
-            text("since last live off")
-                .size(12)
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(p.text_primary),
-                },),
-        ]
-        .spacing(2),
-    )
-    .padding([8, 10])
-    .style(move |_| container::Style {
-        background: Some(Background::Color(iced::Color {
-            a: 0.88,
-            ..p.card_2
-        })),
-        border: Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: p.border,
-        },
-        ..Default::default()
-    })
-    .into();
-
-    let overlay_layer: Element<Message> = container(overlay_card)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(Alignment::Start)
-        .align_y(Alignment::Start)
-        .padding(10)
-        .into();
-
-    iced::widget::stack![inner, overlay_layer].into()
-}
-
-#[cfg(not(feature = "diagnostics"))]
-pub fn with_debug_overlay<'a>(
-    _app: &crate::app::Snapdash,
-    inner: Element<'a, Message>,
-    _win: &WindowState,
-) -> Element<'a, Message> {
-    inner
 }
 
 /// Wraps `MouseArea` with hover effect and added drag.

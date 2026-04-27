@@ -1,5 +1,3 @@
-#[cfg(feature = "diagnostics")]
-use iced::widget::checkbox;
 use iced::widget::{column, container, mouse_area, row};
 use iced::{Element, Length, mouse};
 
@@ -186,41 +184,6 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
         .height(Length::Fill)
         .push(home_assistant_card)
         .push(theme_card);
-
-    #[cfg(feature = "diagnostics")]
-    {
-        let debug_toggle: Element<Message> = checkbox(snap.config.debug_overlay)
-            .label("Show debug overlay in windows")
-            .on_toggle(Message::DebugOverlayToggled)
-            .text_size(14)
-            .style(move |_, _| iced::widget::checkbox::Style {
-                background: iced::Background::Color(p.bg),
-                text_color: Some(p.text_primary),
-                icon_color: p.accent,
-                border: iced::Border {
-                    color: p.text_primary,
-                    width: 0.5,
-                    radius: 15.0.into(),
-                },
-            })
-            .into();
-
-        let diagnostics_card = components::subcard(
-            column![
-                components::section("Diagnostics", p),
-                debug_toggle,
-                components::dimmed(
-                    "FPS is derived from real iced redraw events after diagnostics are enabled.",
-                    p
-                ),
-            ]
-            .spacing(metric::GAP)
-            .into(),
-            p,
-        );
-
-        content = content.push(diagnostics_card);
-    }
 
     content = content.push(sensors_card).push(save_row).push(status_row);
 

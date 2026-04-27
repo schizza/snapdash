@@ -1,9 +1,8 @@
-//! Composited shadow rendering for Linux + Windows.
+//! Composited shadow rendering for Linux.
 //!
-//! Both platforms render their own anti-aliased rounded corners + drop
-//! shadow inside the window via the iced-wgpu shader, since the OS-level
-//! mechanisms either don't exist (Linux compositors) or produce jagged
-//! 1-bit results (Windows `SetWindowRgn`).
+//! Linux renders its own anti-aliased rounded corners + drop shadow inside
+//! the window via the iced-wgpu shader, since desktop compositors do not draw
+//! native shadows for undecorated transparent surfaces.
 //!
 //! See `super` module doc for the high-level approach.
 
