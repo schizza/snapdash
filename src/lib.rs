@@ -11,12 +11,11 @@ use iced::daemon;
 
 /// Build and run the Snapdash daemon.
 ///
-/// On Linux and Windows we install a custom `.style()` that clears the
-/// surface to `Color::TRANSPARENT` so the shadow-margin area around the
-/// card stays transparent (see `Snapdash::style` and `ui::platform`).
-/// On macOS the OS-level rounded-corner hack in iced_winit plus the
-/// card-filling-the-window layout make the default opaque theme clear
-/// color invisible, so we keep the iced default.
+/// On Linux we install a custom `.style()` that clears the surface to
+/// `Color::TRANSPARENT` so the shadow-margin area around the card stays
+/// transparent (see `Snapdash::style` and `ui::platform`). On macOS/Windows
+/// the native rounded-corner/shadow path clips the card-filling window before
+/// any cleared pixel is visible, so we keep the iced default.
 pub fn run() -> iced::Result {
     let _gurad = logger::init();
 
