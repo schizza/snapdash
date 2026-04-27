@@ -224,12 +224,18 @@ impl Snapdash {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let redraw_events = iced::event::listen_raw(|event, _status, id| match event {
-            iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                Some(Message::WindowRedraw(id))
-            }
-            _ => None,
-        });
+        let redraw_events_needed = self.windows.values().any(|win| win.entity.pulse > 0.0);
+
+        let redraw_events = if redraw_events_needed {
+            iced::event::listen_raw(|event, _status, id| match event {
+                iced::Event::Window(window::Event::RedrawRequested(_)) => {
+                    Some(Message::WindowRedraw(id))
+                }
+                _ => None,
+            })
+        } else {
+            Subscription::none()
+        };
 
         let ha = if let Some(connection) = &self.ha_connection {
             Subscription::run_with(connection.clone(), crate::ha::ws::connect).map(Message::HaEvent)
