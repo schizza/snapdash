@@ -1,6 +1,6 @@
 [package]
 name = "snapdash"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 authors = ["Lukáš Svoboda <opensource@schizza.cz>"]
 license = "Apache-2.0"
