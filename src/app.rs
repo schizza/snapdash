@@ -82,6 +82,9 @@ pub struct Snapdash {
     pub release_notes_items: Vec<iced::widget::markdown::Item>,
 
     pub last_widget_move_at: Option<std::time::Instant>,
+
+    pub config_save_in_flight: bool,
+    pub config_save_pending: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -165,6 +168,8 @@ impl Snapdash {
             latest_release: None,
             release_notes_items: Vec::new(),
             last_widget_move_at: None,
+            config_save_in_flight: false,
+            config_save_pending: false,
         }
     }
     pub fn boot() -> (Self, Task<Message>) {
@@ -423,11 +428,7 @@ impl Snapdash {
 
                 let (msg, _) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, LogType::Error);
-
-                let cfg = self.config.clone();
-                Task::perform(async move { cfg.save_async().await }, |_| {
-                    Message::SaveConfig
-                })
+                self.save_config()
             }
         }
     }
@@ -442,6 +443,21 @@ impl Snapdash {
             LogType::DoNotLog => (),
         }
         self.status = msg;
+    }
+
+    fn save_config(&mut self) -> Task<Message> {
+        if self.config_save_in_flight {
+            // newer state will be picked up when the in-flight save completes.
+
+            self.config_save_pending = true;
+            return Task::none();
+        }
+
+        self.config_save_in_flight = true;
+        let cfg = self.config.clone();
+        Task::perform(async move { cfg.save_async().await }, |_| {
+            Message::SaveConfig
+        })
     }
 
     fn is_entity_window_open(&self, entity_id: &str) -> bool {
@@ -561,12 +577,10 @@ impl Snapdash {
                         Message::OpenEntity(entity_id.clone())
                     }));
                 }
+
                 self.rebuild_selected_widgets();
                 // save widget configuration
-                let cfg = self.config.clone();
-                task.push(Task::perform(async move { cfg.save_async().await }, |_| {
-                    Message::SaveConfig
-                }));
+                task.push(self.save_config());
 
                 Task::batch(task)
             }
@@ -628,8 +642,7 @@ impl Snapdash {
                         }
                     }
                 }
-                let cfg = self.config.clone();
-                Task::perform(async move { cfg.save_async().await }, |_| Message::Saved)
+                self.save_config().chain(Task::done(Message::Saved))
             }
 
             Message::Saved => {
@@ -699,15 +712,18 @@ impl Snapdash {
             Message::ThemeSelected(t) => {
                 self.theme = t;
                 self.config.theme = t;
-                let cfg = self.config.clone();
-                let save = Task::perform(async move { cfg.save_async().await }, |_| {
-                    Message::SaveConfig
-                });
 
-                Task::batch([save])
+                self.save_config()
             }
 
-            Message::SaveConfig => Task::none(),
+            Message::SaveConfig => {
+                self.config_save_in_flight = false;
+                if self.config_save_pending {
+                    self.config_save_pending = false;
+                    return self.save_config();
+                }
+                Task::none()
+            }
 
             Message::ConnectHa => {
                 if !self.config.ha_enabled() {
@@ -725,13 +741,7 @@ impl Snapdash {
                         self.set_status(format!("Missing token in keychain {e}"), LogType::Error);
                         self.config.ha_token_present = false;
 
-                        let cfg = self.config.clone();
-                        return Task::perform(
-                            async move {
-                                let _ = cfg.save_async().await;
-                            },
-                            |_| Message::Noop,
-                        );
+                        return self.save_config().chain(Task::done(Message::Noop));
                     }
                 };
 
@@ -857,10 +867,7 @@ impl Snapdash {
                     return Task::none();
                 }
                 self.last_widget_move_at = None;
-                let cfg = self.config.clone();
-                Task::perform(async move { cfg.save_async().await }, |_| {
-                    Message::SaveConfig
-                })
+                self.save_config()
             }
         }
     }
