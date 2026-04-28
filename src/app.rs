@@ -3,7 +3,7 @@ use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
 use crate::ui::platform::window_settings;
 use crate::update;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use iced::{Element, Task};
@@ -19,7 +19,7 @@ pub enum WindowKind {
     Entity { entity_id: String },
     ReleaseNotes,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WindowState {
     pub kind: WindowKind,
     pub entity: EntityWindowState,
@@ -63,7 +63,6 @@ pub struct Snapdash {
     pub ha_token_draft: String,
 
     pub windows: HashMap<window::Id, WindowState>,
-    pub pending_opens: VecDeque<WindowKind>,
 
     pub theme_options: Vec<ThemeKind>,
     pub status: String,
@@ -94,7 +93,10 @@ pub enum Message {
     QuitApp,
     WindowClosed(window::Id),
     //  WindowOpened(window::Id, WindowKind),
-    WindowActuallyOpened(window::Id),
+    WindowOpened {
+        id: window::Id,
+        kind: WindowKind,
+    },
 
     ThemeSelected(ThemeKind),
     SaveConfig,
@@ -144,7 +146,6 @@ impl Snapdash {
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
             windows: HashMap::new(),
-            pending_opens: VecDeque::new(),
             entities_by_id: HashMap::new(),
             entity_windows: HashMap::new(),
             boot_open_done: false,
@@ -554,25 +555,21 @@ impl Snapdash {
                 Task::none()
             }
 
-            Message::WindowActuallyOpened(id) => {
-                if let Some(kind) = self.pending_opens.pop_front() {
-                    let mut entity = EntityWindowState::default();
+            Message::WindowOpened { id, kind } => {
+                let mut entity = EntityWindowState::default();
 
-                    if let WindowKind::Entity { entity_id } = &kind {
-                        entity.entity_id = entity_id.clone();
+                if let WindowKind::Entity { entity_id } = &kind {
+                    entity.entity_id = entity_id.clone();
 
-                        if let Some(st) = self.entities_by_id.get(&entity.entity_id) {
-                            entity.last = Some(st.clone());
-                        }
-                        self.entity_windows.insert(entity_id.clone(), id);
+                    if let Some(st) = self.entities_by_id.get(&entity.entity_id) {
+                        entity.last = Some(st.clone());
                     }
-                    self.windows.insert(id, WindowState { kind, entity });
-                } else {
-                    self.set_status(
-                        "Received WindowActuallyOpened but pending_opens is empty",
-                        LogType::Warn,
-                    );
+
+                    self.entity_windows.insert(entity_id.clone(), id);
                 }
+
+                self.windows.insert(id, WindowState { kind, entity });
+
                 Task::none()
             }
 
@@ -628,15 +625,16 @@ impl Snapdash {
                     return iced::window::gain_focus::<Message>(settings_id);
                 }
 
-                self.pending_opens.push_back(WindowKind::Settings);
-
                 // The platform helper adds a transparent shadow margin on
                 // Linux (where we render our own shader shadow) and is a
                 // no-op on macOS/Windows (where the OS clips + draws its
                 // own shadow). See `ui::platform` module doc.
                 let settings = window_settings(iced::Size::new(820.0, 950.0), false);
-                let (_id, task_id) = window::open(settings);
-                task_id.map(Message::WindowActuallyOpened)
+                let (id, task_id) = window::open(settings);
+                task_id.map(move |_| Message::WindowOpened {
+                    id,
+                    kind: WindowKind::Settings,
+                })
             }
 
             Message::OpenEntity(entity_id) => {
@@ -661,11 +659,13 @@ impl Snapdash {
                         continue;
                     }
 
-                    self.pending_opens
-                        .push_back(WindowKind::Entity { entity_id: widget });
-
-                    let (_id, task_id) = window::open(win_settings.clone());
-                    task.push(task_id.map(Message::WindowActuallyOpened));
+                    let (id, task_id) = window::open(win_settings.clone());
+                    task.push(task_id.map(move |_| Message::WindowOpened {
+                        id,
+                        kind: WindowKind::Entity {
+                            entity_id: widget.clone(),
+                        },
+                    }));
                 }
 
                 if task.is_empty() {
@@ -778,10 +778,12 @@ impl Snapdash {
                     return iced::window::gain_focus::<Message>(opened);
                 }
 
-                self.pending_opens.push_back(WindowKind::ReleaseNotes);
                 let settings = window_settings(iced::Size::new(560.0, 640.0), false);
-                let (_id, task_id) = window::open(settings);
-                task_id.map(Message::WindowActuallyOpened)
+                let (id, task_id) = window::open(settings);
+                task_id.map(move |_| Message::WindowOpened {
+                    id,
+                    kind: WindowKind::ReleaseNotes,
+                })
             }
             Message::OpenUrl(url) => {
                 if let Err(e) = open::that(&url) {
