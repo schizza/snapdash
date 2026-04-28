@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,14 @@ pub struct Config {
     pub debug_overlay: bool,
     #[serde(default)]
     pub widgets: Vec<String>,
+    #[serde(default)]
+    pub widget_positions: HashMap<String, WidgetPosition>,
+}
+
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq)]
+pub struct WidgetPosition {
+    pub x: f32,
+    pub y: f32,
 }
 
 impl Default for Config {
@@ -26,6 +34,7 @@ impl Default for Config {
             ha_token_present: false,
             debug_overlay: false,
             widgets: Vec::new(),
+            widget_positions: HashMap::new(),
         }
     }
 }
