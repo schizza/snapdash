@@ -3,7 +3,7 @@ use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
 use crate::ui::platform::window_settings;
 use crate::update;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use iced::{Element, Task};
@@ -63,7 +63,6 @@ pub struct Snapdash {
     pub ha_token_draft: String,
 
     pub windows: HashMap<window::Id, WindowState>,
-    pub pending_opens: VecDeque<WindowKind>,
 
     pub theme_options: Vec<ThemeKind>,
     pub status: String,
@@ -147,7 +146,6 @@ impl Snapdash {
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
             windows: HashMap::new(),
-            pending_opens: VecDeque::new(),
             entities_by_id: HashMap::new(),
             entity_windows: HashMap::new(),
             boot_open_done: false,
@@ -626,8 +624,6 @@ impl Snapdash {
                 {
                     return iced::window::gain_focus::<Message>(settings_id);
                 }
-
-                self.pending_opens.push_back(WindowKind::Settings);
 
                 // The platform helper adds a transparent shadow margin on
                 // Linux (where we render our own shader shadow) and is a
