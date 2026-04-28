@@ -9,7 +9,7 @@ use std::time::Duration;
 use iced::{Element, Task};
 use iced::{Subscription, window};
 
-use crate::config::Config;
+use crate::config::{Config, WidgetPosition};
 use crate::secrets;
 use crate::theme::ThemeKind;
 
@@ -80,6 +80,8 @@ pub struct Snapdash {
     pub update_state: UpdateState,
     pub latest_release: Option<update::GitHubRelease>,
     pub release_notes_items: Vec<iced::widget::markdown::Item>,
+
+    pub last_widget_move_at: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +129,12 @@ pub enum Message {
     EntitySearchChanged(String),
     CheckForUpdate,
     LastVersionChecked(Option<update::GitHubRelease>),
+
+    WidgetMoved {
+        id: window::Id,
+        position: iced::Point,
+    },
+    PersistWidgetPositions,
 }
 
 impl Default for Snapdash {
@@ -156,6 +164,7 @@ impl Snapdash {
             update_state: UpdateState::Unknown,
             latest_release: None,
             release_notes_items: Vec::new(),
+            last_widget_move_at: None,
         }
     }
     pub fn boot() -> (Self, Task<Message>) {
@@ -238,6 +247,14 @@ impl Snapdash {
             Subscription::none()
         };
 
+        let move_events = iced::event::listen_raw(|event, _status, id| match event {
+            iced::Event::Window(window::Event::Moved(point)) => Some(Message::WidgetMoved {
+                id,
+                position: point,
+            }),
+            _ => None,
+        });
+
         let ha = if let Some(connection) = &self.ha_connection {
             Subscription::run_with(connection.clone(), crate::ha::ws::connect).map(Message::HaEvent)
         } else {
@@ -272,6 +289,7 @@ impl Snapdash {
         Subscription::batch([
             window::close_events().map(Message::WindowClosed),
             redraw_events,
+            move_events,
             keyboard_events,
             ha,
             check_for_update,
@@ -545,7 +563,10 @@ impl Snapdash {
                 }
                 self.rebuild_selected_widgets();
                 // save widget configuration
-                task.push(Task::perform(async {}, |_| Message::SaveConfig));
+                let cfg = self.config.clone();
+                task.push(Task::perform(async move { cfg.save_async().await }, |_| {
+                    Message::SaveConfig
+                }));
 
                 Task::batch(task)
             }
@@ -638,11 +659,6 @@ impl Snapdash {
             }
 
             Message::OpenEntity(entity_id) => {
-                // vytvoř nové okno pro entitu
-                // let (id, cmd) = window::open(...);
-                // self.entity_windows.insert(id, EntityWindowState { ... });
-                //
-
                 let widgets: Vec<String> = if entity_id.is_empty() {
                     self.config.widgets.clone()
                 } else {
@@ -651,7 +667,6 @@ impl Snapdash {
 
                 // Platform helper: adds shadow margin on Linux, pass-through
                 // on macOS/Windows. See `ui::platform` module doc.
-                let win_settings = window_settings(iced::Size::new(240.0, 160.0), false);
                 let mut task = Vec::new();
 
                 for widget in widgets {
@@ -659,7 +674,13 @@ impl Snapdash {
                         continue;
                     }
 
-                    let (id, task_id) = window::open(win_settings.clone());
+                    let mut win_settings = window_settings(iced::Size::new(240.0, 160.0), false);
+                    if let Some(saved) = self.config.widget_positions.get(&widget) {
+                        win_settings.position =
+                            window::Position::Specific(iced::Point::new(saved.x, saved.y));
+                    }
+
+                    let (id, task_id) = window::open(win_settings);
                     task.push(task_id.map(move |_| Message::WindowOpened {
                         id,
                         kind: WindowKind::Entity {
@@ -790,6 +811,56 @@ impl Snapdash {
                     tracing::warn!(url, error = %e, "failed to open URL");
                 }
                 Task::none()
+            }
+
+            Message::WidgetMoved { id, position } => {
+                let Some(window) = self.windows.get(&id) else {
+                    return Task::none();
+                };
+                let WindowKind::Entity { entity_id } = &window.kind else {
+                    return Task::none();
+                };
+
+                let entity_id = entity_id.clone();
+                let new_position = WidgetPosition {
+                    x: position.x,
+                    y: position.y,
+                };
+
+                // Filter: if position is not moved - do nothing. Without filter we will fire
+                // debounce timer with every programatic move (ex. window manager snap-to-grid on borders).
+
+                if self.config.widget_positions.get(&entity_id) == Some(&new_position) {
+                    return Task::none();
+                }
+
+                self.config.widget_positions.insert(entity_id, new_position);
+                self.last_widget_move_at = Some(std::time::Instant::now());
+
+                Task::perform(
+                    async {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    },
+                    |_| Message::PersistWidgetPositions,
+                )
+            }
+
+            Message::PersistWidgetPositions => {
+                let Some(last) = self.last_widget_move_at else {
+                    return Task::none();
+                };
+
+                // Trailing-edge debounce: if last move < 500ms, widget has moved once more
+                // delay write
+
+                if last.elapsed() < Duration::from_millis(500) {
+                    return Task::none();
+                }
+                self.last_widget_move_at = None;
+                let cfg = self.config.clone();
+                Task::perform(async move { cfg.save_async().await }, |_| {
+                    Message::SaveConfig
+                })
             }
         }
     }
