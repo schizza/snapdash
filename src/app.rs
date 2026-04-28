@@ -784,7 +784,10 @@ impl Snapdash {
 
                 let settings = window_settings(iced::Size::new(560.0, 640.0), false);
                 let (id, task_id) = window::open(settings);
-                task_id.map(move |_| Message::WindowOpened { id, kind: WindowKind::ReleaseNotes })
+                task_id.map(move |_| Message::WindowOpened {
+                    id,
+                    kind: WindowKind::ReleaseNotes,
+                })
             }
             Message::OpenUrl(url) => {
                 if let Err(e) = open::that(&url) {
