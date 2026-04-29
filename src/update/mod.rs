@@ -1,3 +1,6 @@
+//! Self-update domain: version polling against GitHub releases plus the
+//! observable status the UI consumes.
+
 use serde::Deserialize;
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -14,6 +17,7 @@ pub struct GitHubRelease {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum UpdateState {
+    /// Initial state before the first release check completes.
     #[default]
     Unknown,
     UptoDate,
@@ -24,6 +28,8 @@ pub enum UpdateState {
 pub struct UpdateStatus {
     pub state: UpdateState,
     pub latest_release: Option<GitHubRelease>,
+    /// Pre-parsed markdown for the release-notes view. Cached here so we
+    /// don't re-parse on every render.
     pub release_notes_items: Vec<iced::widget::markdown::Item>,
 }
 
@@ -32,6 +38,8 @@ impl UpdateStatus {
         self.state == UpdateState::UpdateAvailable
     }
 
+    /// Apply the outcome of a release-check task. `Some` means the remote
+    /// version is newer than `CURRENT_VERSION`; `None` means we're up to date.
     pub fn record_check(&mut self, release: Option<GitHubRelease>) {
         match release {
             Some(release) => {
@@ -49,6 +57,10 @@ impl UpdateStatus {
     }
 }
 
+/// Fetch the latest GitHub release and return it only if its tag differs
+/// from `CURRENT_VERSION`. Network or parse failures collapse to `None` so
+/// callers can treat "no update" and "couldn't reach GitHub" the same way —
+/// the UI should not nag the user about transient connectivity.
 pub async fn get_latest_version() -> Option<GitHubRelease> {
     let client = reqwest::Client::new();
 

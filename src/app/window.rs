@@ -1,3 +1,8 @@
+//! Window-management types and helpers. A Snapdash session can open
+//! several windows (settings, per-entity widgets, release notes) and they
+//! are addressed by `window::Id` from iced; `WindowKind` tags what each
+//! id is for so the view layer can dispatch correctly.
+
 use std::collections::HashMap;
 
 use iced::window;
@@ -25,6 +30,10 @@ pub struct EntityWindowState {
     pub hovered: bool,
 }
 
+/// Look up the window id for a given `kind`, optionally matching on the
+/// inner entity id (used by `WindowKind::Entity`). Returns `None` when
+/// the window isn't currently open — callers use this to decide between
+/// focusing the existing window and spawning a new one.
 pub fn find_window_id(
     windows: &HashMap<window::Id, WindowState>,
     kind: WindowKind,

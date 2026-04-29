@@ -1,3 +1,8 @@
+//! Iced runtime wiring: how `Snapdash` boots and what it subscribes to.
+//! Kept separate from `snapdash.rs` (the message-handling core) so each
+//! file has one job and `lib.rs`'s `daemon(...)` plumbing has an obvious
+//! home.
+
 use std::time::Duration;
 
 use iced::{Subscription, Task, window};
@@ -8,6 +13,9 @@ use crate::update;
 use super::{FocusDirection, Message, Snapdash};
 
 impl Snapdash {
+    /// Initial state plus the tasks that must run before the first frame:
+    /// load the on-disk config and fire the first GitHub release check in
+    /// parallel.
     pub fn boot() -> (Self, Task<Message>) {
         let state = Self::new();
 
@@ -24,6 +32,9 @@ impl Snapdash {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
+        // RedrawRequested fires on every frame, so we only subscribe while
+        // an entity is animating its pulse. Otherwise we'd burn CPU on
+        // idle widgets.
         let redraw_events_needed = self.windows.values().any(|win| win.entity.pulse > 0.0);
 
         let redraw_events = if redraw_events_needed {
@@ -45,6 +56,9 @@ impl Snapdash {
             _ => None,
         });
 
+        // The WS subscription is keyed on the connection config, so
+        // mutating `self.ha.connection` (e.g. token change) tears the old
+        // stream down and starts a new one. `None` keeps it idle.
         let ha = if let Some(connection) = &self.ha.connection {
             Subscription::run_with(connection.clone(), crate::ha::ws::connect).map(Message::HaEvent)
         } else {
