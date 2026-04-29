@@ -132,7 +132,7 @@ pub fn pill_button(
     b
 }
 
-pub fn icon<'a>(
+pub fn icon(
     content: impl Into<Element<'static, Message>>,
     p: Palette,
     on_press: Option<Message>,

@@ -40,7 +40,7 @@ pub fn run() -> iced::Result {
         app::Snapdash::view,
     )
     .subscription(app::Snapdash::subscription)
-    .default_font(iced::Font::with_name("Inter"))
+    .default_font(iced::Font::with_name("Inter Variable"))
     .font(INTER_VARIABLE)
     .font(LUCIDE_FONT);
 
