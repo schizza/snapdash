@@ -64,7 +64,6 @@ pub fn view(
     update: bool,
 ) -> Element<'_, Message> {
     let (friendly, main_opt, detail) = format_main_value(state);
-
     let update_icon: Element<Message> = if update {
         mouse_area(components::dimmed(
             '⤓',
