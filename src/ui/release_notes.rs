@@ -8,7 +8,7 @@ use crate::ui::components;
 pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     let p = snap.theme.palette();
 
-    let title_text = match &snap.latest_release {
+    let title_text = match &snap.update.latest_release {
         Some(r) => format!("Update to {}", r.tag_name),
         None => "Release notes".to_owned(),
     };
@@ -25,7 +25,7 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     .align_y(Alignment::Center)
     .into();
 
-    let Some(release) = &snap.latest_release else {
+    let Some(release) = &snap.update.latest_release else {
         let body: Element<Message> = container(components::dimmed("No update available", p))
             .center(Length::Fill)
             .height(Length::Fill)
@@ -64,7 +64,7 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     };
 
     let md_inner: Element<Message> = markdown::view(
-        &snap.release_notes_items,
+        &snap.update.release_notes_items,
         markdown::Settings::with_text_size(13, md_style),
     )
     .map(Message::OpenUrl);

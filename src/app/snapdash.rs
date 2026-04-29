@@ -1,3 +1,4 @@
+use crate::ha;
 use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
@@ -6,32 +7,14 @@ use crate::update;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use iced::window;
 use iced::{Element, Task};
-use iced::{Subscription, window};
 
 use crate::config::{Config, WidgetPosition};
-use crate::secrets;
+use crate::ha::token;
 use crate::theme::ThemeKind;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum WindowKind {
-    Settings,
-    Entity { entity_id: String },
-    ReleaseNotes,
-}
-#[derive(Debug, Clone)]
-pub struct WindowState {
-    pub kind: WindowKind,
-    pub entity: EntityWindowState,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct EntityWindowState {
-    pub entity_id: String,
-    pub last: Option<EntityState>,
-    pub pulse: f32, // TODO: Replace with Animation/spring. Currently just easy "animation paramter" (0..1), později nahradit Animation/spring
-    pub hovered: bool,
-}
+use super::window::{EntityWindowState, WindowKind, WindowState, find_window_id};
 
 #[derive(Debug, Clone)]
 pub struct SettingsSensor {
@@ -46,28 +29,18 @@ pub enum FocusDirection {
     Previous,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum UpdateState {
-    Unknown,
-    UptoDate,
-    UpdateAvailable,
-}
-
 #[derive(Debug)]
 pub struct Snapdash {
     pub config: Config,
     pub theme: ThemeKind,
 
-    pub ha_connected: bool,
-    pub ha_connection: Option<HaConnectionConfig>,
-    pub ha_token_draft: String,
+    pub ha: ha::HaState,
 
     pub windows: HashMap<window::Id, WindowState>,
 
     pub theme_options: Vec<ThemeKind>,
     pub status: String,
 
-    pub entities_by_id: HashMap<String, EntityState>,
     pub entity_windows: HashMap<String, window::Id>,
     pub boot_open_done: bool,
 
@@ -77,9 +50,7 @@ pub struct Snapdash {
 
     pub entity_search_query: String,
 
-    pub update_state: UpdateState,
-    pub latest_release: Option<update::GitHubRelease>,
-    pub release_notes_items: Vec<iced::widget::markdown::Item>,
+    pub update: update::UpdateStatus,
 
     pub last_widget_move_at: Option<std::time::Instant>,
 
@@ -151,42 +122,22 @@ impl Snapdash {
         Self {
             config: Config::default(),
             theme: ThemeKind::default(),
-            ha_connected: false,
-            ha_connection: None,
-            ha_token_draft: String::new(),
+            ha: ha::HaState::default(),
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
             windows: HashMap::new(),
-            entities_by_id: HashMap::new(),
             entity_windows: HashMap::new(),
             boot_open_done: false,
             settings_sensors: Vec::new(),
             selected_widgets: HashSet::new(),
             active_settings_sensors: Vec::new(),
             entity_search_query: String::new(),
-            update_state: UpdateState::Unknown,
-            latest_release: None,
-            release_notes_items: Vec::new(),
+            update: update::UpdateStatus::default(),
             last_widget_move_at: None,
             config_save_in_flight: false,
             config_save_pending: false,
         }
     }
-    pub fn boot() -> (Self, Task<Message>) {
-        let state = Self::new();
-
-        let load_task = Task::perform(
-            async { Config::load().await.map_err(|e| e.to_string()) },
-            Message::ConfigLoad,
-        );
-
-        let check_update = Task::perform(update::get_latest_version(), Message::LastVersionChecked);
-
-        let tasks = Task::batch([load_task, check_update]);
-
-        (state, tasks)
-    }
-
     fn rebuild_active_settings_sensors(&mut self) {
         self.active_settings_sensors = self
             .settings_sensors
@@ -203,7 +154,8 @@ impl Snapdash {
 
     pub fn rebuild_settings_sensors(&mut self) {
         let mut sensors: Vec<SettingsSensor> = self
-            .entities_by_id
+            .ha
+            .entities
             .values()
             .filter(|e| e.entity_id.starts_with("sensor."))
             .map(|e| {
@@ -238,69 +190,6 @@ impl Snapdash {
         self.rebuild_active_settings_sensors();
     }
 
-    pub fn subscription(&self) -> Subscription<Message> {
-        let redraw_events_needed = self.windows.values().any(|win| win.entity.pulse > 0.0);
-
-        let redraw_events = if redraw_events_needed {
-            iced::event::listen_raw(|event, _status, id| match event {
-                iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                    Some(Message::WindowRedraw(id))
-                }
-                _ => None,
-            })
-        } else {
-            Subscription::none()
-        };
-
-        let move_events = iced::event::listen_raw(|event, _status, id| match event {
-            iced::Event::Window(window::Event::Moved(point)) => Some(Message::WidgetMoved {
-                id,
-                position: point,
-            }),
-            _ => None,
-        });
-
-        let ha = if let Some(connection) = &self.ha_connection {
-            Subscription::run_with(connection.clone(), crate::ha::ws::connect).map(Message::HaEvent)
-        } else {
-            Subscription::none()
-        };
-
-        let keyboard_events = iced::event::listen_raw(|event, _status, id| {
-            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
-                modifiers,
-                ..
-            }) = event
-            else {
-                return None;
-            };
-
-            let direction = if modifiers.shift() {
-                FocusDirection::Previous
-            } else {
-                FocusDirection::Next
-            };
-
-            Some(Message::FocusMove {
-                window_id: id,
-                direction,
-            })
-        });
-
-        let check_for_update =
-            iced::time::every(Duration::from_hours(1)).map(|_| Message::CheckForUpdate);
-
-        Subscription::batch([
-            window::close_events().map(Message::WindowClosed),
-            redraw_events,
-            move_events,
-            keyboard_events,
-            ha,
-            check_for_update,
-        ])
-    }
-
     fn handle_redraw_requested(&mut self, id: window::Id) {
         let Some(window) = self.windows.get_mut(&id) else {
             return;
@@ -331,13 +220,13 @@ impl Snapdash {
     }
 
     fn apply_initial_states(&mut self, states: Vec<EntityState>) {
-        self.entities_by_id.clear();
+        self.ha.entities.clear();
 
         for state in states {
             let entity_id = state.entity_id.clone();
 
             self.set_window_entity_state(&entity_id, &state, false);
-            self.entities_by_id.insert(entity_id, state.clone());
+            self.ha.entities.insert(entity_id, state.clone());
         }
         self.rebuild_settings_sensors();
     }
@@ -347,7 +236,7 @@ impl Snapdash {
 
         self.set_window_entity_state(&entity_id, &new_state, true);
 
-        let should_refresh_settings = match self.entities_by_id.get(&entity_id) {
+        let should_refresh_settings = match self.ha.entities.get(&entity_id) {
             None => true,
             Some(old) => {
                 let old_is_sensor = old.entity_id.starts_with("sensor.");
@@ -363,7 +252,7 @@ impl Snapdash {
             }
         };
 
-        self.entities_by_id.insert(entity_id, new_state);
+        self.ha.entities.insert(entity_id, new_state);
 
         if should_refresh_settings {
             self.rebuild_settings_sensors();
@@ -403,12 +292,12 @@ impl Snapdash {
     fn handle_ha_event(&mut self, ev: HaEvent) -> Task<Message> {
         match ev {
             HaEvent::Connected => {
-                self.ha_connected = true;
+                self.ha.connected = true;
                 self.set_status("HA Connected", LogType::Info);
                 Task::none()
             }
             HaEvent::Disconnected(error) => {
-                self.ha_connected = false;
+                self.ha.connected = false;
                 let (msg, severity) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, severity);
                 Task::none()
@@ -422,8 +311,8 @@ impl Snapdash {
                 Task::none()
             }
             HaEvent::AuthFailed(error) => {
-                self.ha_connected = false;
-                self.ha_connection = None;
+                self.ha.connected = false;
+                self.ha.connection = None;
                 self.config.ha_token_present = false;
 
                 let (msg, _) = Snapdash::ha_error_status(&error);
@@ -464,26 +353,6 @@ impl Snapdash {
         self.entity_windows.contains_key(entity_id)
     }
 
-    fn find_window_id(
-        windows: &HashMap<window::Id, WindowState>,
-        kind: WindowKind,
-        name: Option<&str>,
-    ) -> Option<window::Id> {
-        windows
-            .iter()
-            .find(|(_, v)| {
-                if v.kind != kind {
-                    return false;
-                }
-
-                match name {
-                    None => true,
-                    Some(exp) => exp == v.entity.entity_id,
-                }
-            })
-            .map(|(&id, _)| id)
-    }
-
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Noop => Task::none(),
@@ -494,12 +363,12 @@ impl Snapdash {
             }
 
             Message::HaTokenDelete => {
-                match secrets::delete_ha_token() {
+                match token::delete() {
                     Ok(_) => {
                         self.set_status("Token deleted from key-chain", LogType::Info);
                         self.config.ha_token_present = false;
-                        self.ha_connection = None;
-                        self.ha_connected = false;
+                        self.ha.connection = None;
+                        self.ha.connected = false;
                         tracing::warn!("HA disconected due to erased token.");
                     }
                     Err(s) => {
@@ -586,7 +455,7 @@ impl Snapdash {
             }
 
             Message::HaTokenDraftChanged(val) => {
-                self.ha_token_draft = val;
+                self.ha.token_draft = val;
                 Task::none()
             }
 
@@ -596,7 +465,7 @@ impl Snapdash {
                 if let WindowKind::Entity { entity_id } = &kind {
                     entity.entity_id = entity_id.clone();
 
-                    if let Some(st) = self.entities_by_id.get(&entity.entity_id) {
+                    if let Some(st) = self.ha.entities.get(&entity.entity_id) {
                         entity.last = Some(st.clone());
                     }
 
@@ -629,11 +498,11 @@ impl Snapdash {
 
             Message::SavePressed => {
                 self.set_status("Saving...", LogType::DoNotLog);
-                if !self.ha_token_draft.trim().is_empty() {
-                    match crate::secrets::set_ha_token(self.ha_token_draft.trim()) {
+                if !self.ha.token_draft.trim().is_empty() {
+                    match token::set(self.ha.token_draft.trim()) {
                         Ok(()) => {
                             self.config.ha_token_present = true;
-                            self.ha_token_draft.clear();
+                            self.ha.token_draft.clear();
                             self.set_status("Token saved into keychain.", LogType::Info);
                         }
                         Err(e) => {
@@ -653,8 +522,7 @@ impl Snapdash {
             Message::OpenSettings => {
                 // if Settings window is opened, give focus
                 //
-                if let Some(settings_id) =
-                    Snapdash::find_window_id(&self.windows, WindowKind::Settings, None)
+                if let Some(settings_id) = find_window_id(&self.windows, WindowKind::Settings, None)
                 {
                     return iced::window::gain_focus::<Message>(settings_id);
                 }
@@ -727,17 +595,17 @@ impl Snapdash {
 
             Message::ConnectHa => {
                 if !self.config.ha_enabled() {
-                    self.ha_connected = false;
-                    self.ha_connection = None;
+                    self.ha.connected = false;
+                    self.ha.connection = None;
                     self.set_status("HA not enabled (missing token/URL)", LogType::Error);
                     return Task::none();
                 }
 
-                let token = match crate::secrets::get_ha_token() {
+                let stored_token = match token::get() {
                     Ok(t) => t,
                     Err(e) => {
-                        self.ha_connected = false;
-                        self.ha_connection = None;
+                        self.ha.connected = false;
+                        self.ha.connection = None;
                         self.set_status(format!("Missing token in keychain {e}"), LogType::Error);
                         self.config.ha_token_present = false;
 
@@ -747,13 +615,13 @@ impl Snapdash {
 
                 let next_connection = HaConnectionConfig {
                     url: self.config.ha_url.clone(),
-                    token,
+                    token: stored_token,
                 };
 
-                if self.ha_connection.as_ref() != Some(&next_connection) {
-                    self.ha_connected = false;
+                if self.ha.connection.as_ref() != Some(&next_connection) {
+                    self.ha.connected = false;
                     self.set_status("Connecting to HA ...", LogType::Info);
-                    self.ha_connection = Some(next_connection);
+                    self.ha.connection = Some(next_connection);
                 }
 
                 Task::none()
@@ -790,21 +658,11 @@ impl Snapdash {
             }
 
             Message::LastVersionChecked(release) => {
-                if let Some(release) = release {
-                    self.update_state = UpdateState::UpdateAvailable;
-                    self.release_notes_items =
-                        iced::widget::markdown::parse(&release.body).collect();
-                    self.latest_release = Some(release);
-                } else {
-                    self.update_state = UpdateState::UptoDate;
-                    self.latest_release = None;
-                    self.release_notes_items.clear();
-                }
+                self.update.record_check(release);
                 Task::none()
             }
             Message::OpenReleaseNotes => {
-                if let Some(opened) =
-                    Snapdash::find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
+                if let Some(opened) = find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
                 {
                     return iced::window::gain_focus::<Message>(opened);
                 }

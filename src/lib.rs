@@ -2,7 +2,6 @@ pub mod app;
 pub mod config;
 pub mod ha;
 pub mod logger;
-pub mod secrets;
 pub mod theme;
 pub mod ui;
 pub mod update;
