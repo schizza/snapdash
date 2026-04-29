@@ -14,25 +14,7 @@ use crate::config::{Config, WidgetPosition};
 use crate::ha::token;
 use crate::theme::ThemeKind;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum WindowKind {
-    Settings,
-    Entity { entity_id: String },
-    ReleaseNotes,
-}
-#[derive(Debug, Clone)]
-pub struct WindowState {
-    pub kind: WindowKind,
-    pub entity: EntityWindowState,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct EntityWindowState {
-    pub entity_id: String,
-    pub last: Option<EntityState>,
-    pub pulse: f32, // TODO: Replace with Animation/spring. Currently just easy "animation paramter" (0..1), později nahradit Animation/spring
-    pub hovered: bool,
-}
+use super::window::{EntityWindowState, WindowKind, WindowState, find_window_id};
 
 #[derive(Debug, Clone)]
 pub struct SettingsSensor {
@@ -449,26 +431,6 @@ impl Snapdash {
         self.entity_windows.contains_key(entity_id)
     }
 
-    fn find_window_id(
-        windows: &HashMap<window::Id, WindowState>,
-        kind: WindowKind,
-        name: Option<&str>,
-    ) -> Option<window::Id> {
-        windows
-            .iter()
-            .find(|(_, v)| {
-                if v.kind != kind {
-                    return false;
-                }
-
-                match name {
-                    None => true,
-                    Some(exp) => exp == v.entity.entity_id,
-                }
-            })
-            .map(|(&id, _)| id)
-    }
-
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Noop => Task::none(),
@@ -639,7 +601,7 @@ impl Snapdash {
                 // if Settings window is opened, give focus
                 //
                 if let Some(settings_id) =
-                    Snapdash::find_window_id(&self.windows, WindowKind::Settings, None)
+                    find_window_id(&self.windows, WindowKind::Settings, None)
                 {
                     return iced::window::gain_focus::<Message>(settings_id);
                 }
@@ -780,7 +742,7 @@ impl Snapdash {
             }
             Message::OpenReleaseNotes => {
                 if let Some(opened) =
-                    Snapdash::find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
+                    find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
                 {
                     return iced::window::gain_focus::<Message>(opened);
                 }
