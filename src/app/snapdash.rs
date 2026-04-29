@@ -114,6 +114,10 @@ pub enum Message {
         position: iced::Point,
     },
     PersistWidgetPositions,
+
+    OpenConfigFile,
+    OpenLogFile,
+    ResetConfig,
 }
 
 impl Default for Snapdash {
@@ -363,6 +367,40 @@ impl Snapdash {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Noop => Task::none(),
+
+            Message::OpenConfigFile => {
+                match Config::config_path() {
+                    Ok(path) => {
+                        if let Err(e) = open::that(&path) {
+                            tracing::warn!(path = %path.display(), error = %e, "failed to open config file")
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "no config path available"),
+                }
+                Task::none()
+            }
+
+            Message::OpenLogFile => {
+                match crate::logger::log_path() {
+                    Ok(path) => {
+                        if let Err(e) = open::that(&path) {
+                            tracing::warn!(path = %path.display(), error = %e, "failed to open log file")
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "no log path available"),
+                }
+                Task::none()
+            }
+
+            Message::ResetConfig => {
+                self.config = Config::default();
+                self.ha.connection = None;
+                self.ha.connected = false;
+                self.selected_widgets.clear();
+                self.rebuild_active_settings_sensors();
+                self.set_status("Configuration rest to defaults", LogType::Info);
+                self.save_config()
+            }
 
             Message::SettingsPageSelected(page) => {
                 self.settings_page = page;

@@ -47,10 +47,12 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     let p = snap.theme.palette();
 
     let content: Element<Message> = match snap.settings_page {
+        SettingsPage::General => pages::general::view(snap),
         SettingsPage::Connection => pages::connection::view(snap),
         SettingsPage::Appearance => pages::appearance::view(snap),
         SettingsPage::Sensors => pages::sensors::view(snap),
-        _ => placeholder(snap.settings_page.label(), p),
+        SettingsPage::Updates => pages::updates::view(snap),
+        SettingsPage::Advanced => pages::advanced::view(snap),
     };
 
     let body: Element<Message> = iced::widget::row![
@@ -73,10 +75,4 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     .spacing(14);
 
     components::card(outer.into(), p)
-}
-
-fn placeholder<'a>(name: &'a str, p: crate::theme::Palette) -> Element<'a, Message> {
-    iced::widget::container(components::dimmed(format!("{name} - comming soon"), p))
-        .center(Length::Fill)
-        .into()
 }
