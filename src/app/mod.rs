@@ -1,3 +1,4 @@
+mod lifecycle;
 mod snapdash;
 mod window;
 
