@@ -46,14 +46,18 @@ impl SettingsPage {
 }
 
 mod pages;
+mod sidebar;
 
 pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     let p = snap.theme.palette();
     let ui_theme = UiTheme::from(&snap.theme);
 
-    let connection_card = pages::connection::view(snap);
-    let appearance_card = pages::appearance::view(snap);
-    let sensors_card = pages::sensors::view(snap);
+    let content: Element<Message> = match snap.settings_page {
+        SettingsPage::Connection => pages::connection::view(snap),
+        SettingsPage::Appearance => pages::appearance::view(snap),
+        SettingsPage::Sensors => pages::sensors::view(snap),
+        _ => placeholder(snap.settings_page.label(), p),
+    };
 
     let status: Element<Message> = if !snap.status.is_empty() {
         dimmed(snap.status.clone(), p).into()
@@ -123,15 +127,24 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     .width(iced::Fill)
     .into();
 
-    let mut content = column![title_bar, iced::widget::space().height(2),]
-        .spacing(14)
-        .height(Length::Fill)
-        .push(connection_card)
-        .push(appearance_card);
+    let body: Element<Message> = iced::widget::row![
+        sidebar::view(snap),
+        iced::widget::container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(metric::PAD)
+    ]
+    .spacing(metric::GAP)
+    .height(Length::Fill)
+    .into();
 
-    content = content.push(sensors_card).push(save_row).push(status_row);
+    let outer = column![title_bar, body, save_row, status_row].spacing(14);
 
-    let content: Element<Message> = content.into();
+    components::card(outer.into(), p)
+}
 
-    components::card(content, p)
+fn placeholder<'a>(name: &'a str, p: crate::theme::Palette) -> Element<'a, Message> {
+    iced::widget::container(components::dimmed(format!("{name} - comming soon"), p))
+        .center(Length::Fill)
+        .into()
 }
