@@ -44,8 +44,7 @@ impl UpdateStatus {
         match release {
             Some(release) => {
                 self.state = UpdateState::UpdateAvailable;
-                self.release_notes_items =
-                    iced::widget::markdown::parse(&release.body).collect();
+                self.release_notes_items = iced::widget::markdown::parse(&release.body).collect();
                 self.latest_release = Some(release);
             }
             None => {

@@ -7,8 +7,8 @@ use crate::update;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use iced::{Element, Task};
 use iced::window;
+use iced::{Element, Task};
 
 use crate::config::{Config, WidgetPosition};
 use crate::ha::token;
@@ -522,8 +522,7 @@ impl Snapdash {
             Message::OpenSettings => {
                 // if Settings window is opened, give focus
                 //
-                if let Some(settings_id) =
-                    find_window_id(&self.windows, WindowKind::Settings, None)
+                if let Some(settings_id) = find_window_id(&self.windows, WindowKind::Settings, None)
                 {
                     return iced::window::gain_focus::<Message>(settings_id);
                 }
@@ -663,8 +662,7 @@ impl Snapdash {
                 Task::none()
             }
             Message::OpenReleaseNotes => {
-                if let Some(opened) =
-                    find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
+                if let Some(opened) = find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
                 {
                     return iced::window::gain_focus::<Message>(opened);
                 }
