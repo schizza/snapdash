@@ -1,12 +1,11 @@
-use std::default;
-
 use iced::widget::{column, container, mouse_area, row};
 use iced::{Element, Length, mouse};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
-use crate::ui::components::{active_sensor_section, dimmed, sensors_section};
+use crate::ui::components::dimmed;
 use crate::ui::icon::Icon;
+
 use crate::ui::theme::UiTheme;
 use crate::ui::update_view;
 use crate::update;
@@ -46,27 +45,15 @@ impl SettingsPage {
     }
 }
 
+mod pages;
+
 pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     let p = snap.theme.palette();
     let ui_theme = UiTheme::from(&snap.theme);
 
-    let url: Element<Message> = components::mac_input("Home Assistant URL", &snap.config.ha_url, p)
-        .on_input(Message::HaUrlChanged)
-        .into();
-    let placeholder = match snap.config.ha_token_present {
-        true => "Token stored in key-chain",
-        _ => "Enter your token ...",
-    };
-
-    let token: Element<Message> = components::mac_input(placeholder, &snap.ha.token_draft, p)
-        .on_input(Message::HaTokenDraftChanged)
-        .into();
-
-    let token_delete: Element<Message> =
-        components::icon(Icon::Trash.text(ui_theme), p, Some(Message::HaTokenDelete)).into();
-
-    let theme_picker: Element<Message> =
-        components::themepicker(snap.theme_options.clone(), snap.theme, p).into();
+    let connection_card = pages::connection::view(snap);
+    let appearance_card = pages::appearance::view(snap);
+    let sensors_card = pages::sensors::view(snap);
 
     let status: Element<Message> = if !snap.status.is_empty() {
         dimmed(snap.status.clone(), p).into()
@@ -92,70 +79,6 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     .padding([4, 0])
     // .align_x(iced::Alignment::End)
     .into();
-
-    let search: Element<Message> =
-        components::mac_input("Search entities ...", &snap.entity_search_query, p)
-            .on_input(Message::EntitySearchChanged)
-            .width(Length::Fill)
-            .into();
-
-    let available_panel: Element<Message> = components::fieldset(
-        "Available",
-        column![search, sensors_section(snap, p),]
-            .spacing(metric::GAP)
-            .width(Length::Fill)
-            .into(),
-        p,
-    );
-
-    let selected_panel: Element<Message> = components::fieldset(
-        "Selected",
-        column![active_sensor_section(snap, p),]
-            .spacing(metric::GAP)
-            .width(Length::Fill)
-            .into(),
-        p,
-    );
-
-    let home_assistant_card = components::subcard(
-        column![
-            components::section("Home Assistant", p),
-            url,
-            row![token, token_delete]
-                .spacing(metric::GAP)
-                .align_y(iced::Alignment::Center)
-        ]
-        .spacing(metric::GAP)
-        .into(),
-        p,
-    );
-
-    let theme_card = components::subcard(
-        row![components::section("Theme", p), theme_picker]
-            .spacing(metric::GAP)
-            .align_y(iced::Alignment::Center)
-            .into(),
-        p,
-    );
-
-    let sensors_card = components::subcard(
-        column![
-            components::section("Sensors", p),
-            row![
-                container(available_panel).width(Length::FillPortion(1)),
-                container(selected_panel).width(Length::FillPortion(1)),
-            ]
-            .spacing(metric::GAP)
-            .align_y(iced::Alignment::Start)
-            .width(Length::Fill)
-            .height(Length::Fill)
-        ]
-        .spacing(metric::GAP)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into(),
-        p,
-    );
 
     let update_badge: Element<Message> = if snap.update.is_available() {
         mouse_area(components::badge("Update Available", p))
@@ -203,8 +126,8 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     let mut content = column![title_bar, iced::widget::space().height(2),]
         .spacing(14)
         .height(Length::Fill)
-        .push(home_assistant_card)
-        .push(theme_card);
+        .push(connection_card)
+        .push(appearance_card);
 
     content = content.push(sensors_card).push(save_row).push(status_row);
 
