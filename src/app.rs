@@ -10,7 +10,7 @@ use iced::{Element, Task};
 use iced::{Subscription, window};
 
 use crate::config::{Config, WidgetPosition};
-use crate::secrets;
+use crate::ha::token;
 use crate::theme::ThemeKind;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -483,7 +483,7 @@ impl Snapdash {
             }
 
             Message::HaTokenDelete => {
-                match secrets::delete_ha_token() {
+                match token::delete() {
                     Ok(_) => {
                         self.set_status("Token deleted from key-chain", LogType::Info);
                         self.config.ha_token_present = false;
@@ -619,7 +619,7 @@ impl Snapdash {
             Message::SavePressed => {
                 self.set_status("Saving...", LogType::DoNotLog);
                 if !self.ha_token_draft.trim().is_empty() {
-                    match crate::secrets::set_ha_token(self.ha_token_draft.trim()) {
+                    match token::set(self.ha_token_draft.trim()) {
                         Ok(()) => {
                             self.config.ha_token_present = true;
                             self.ha_token_draft.clear();
@@ -722,7 +722,7 @@ impl Snapdash {
                     return Task::none();
                 }
 
-                let token = match crate::secrets::get_ha_token() {
+                let stored_token = match token::get() {
                     Ok(t) => t,
                     Err(e) => {
                         self.ha_connected = false;
@@ -736,7 +736,7 @@ impl Snapdash {
 
                 let next_connection = HaConnectionConfig {
                     url: self.config.ha_url.clone(),
-                    token,
+                    token: stored_token,
                 };
 
                 if self.ha_connection.as_ref() != Some(&next_connection) {
