@@ -1,3 +1,5 @@
+use std::default;
+
 use iced::widget::{column, container, mouse_area, row};
 use iced::{Element, Length, mouse};
 
@@ -10,6 +12,39 @@ use crate::ui::update_view;
 use crate::update;
 
 use super::components;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SettingsPage {
+    #[default]
+    Connection,
+    General,
+    Appearance,
+    Sensors,
+    Updates,
+    Advanced,
+}
+
+impl SettingsPage {
+    pub const ALL: &[Self] = &[
+        Self::General,
+        Self::Connection,
+        Self::Appearance,
+        Self::Sensors,
+        Self::Updates,
+        Self::Advanced,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Connection => "Connection",
+            Self::Appearance => "Appearance",
+            Self::Sensors => "Sensors",
+            Self::Updates => "Updates",
+            Self::Advanced => "Advanced",
+        }
+    }
+}
 
 pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     let p = snap.theme.palette();

@@ -3,6 +3,7 @@ use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
 use crate::ui::platform::window_settings;
+use crate::ui::settings::*;
 use crate::update;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -49,6 +50,8 @@ pub struct Snapdash {
     pub active_settings_sensors: Vec<SettingsSensor>,
 
     pub entity_search_query: String,
+    pub settings_page: SettingsPage,
+    pub settings_search: String,
 
     pub update: update::UpdateStatus,
 
@@ -101,6 +104,8 @@ pub enum Message {
     },
 
     EntitySearchChanged(String),
+    SettingsPageSelected(SettingsPage),
+    SettingsSearchChanged(String),
     CheckForUpdate,
     LastVersionChecked(Option<update::GitHubRelease>),
 
@@ -132,6 +137,8 @@ impl Snapdash {
             selected_widgets: HashSet::new(),
             active_settings_sensors: Vec::new(),
             entity_search_query: String::new(),
+            settings_page: SettingsPage::default(),
+            settings_search: String::new(),
             update: update::UpdateStatus::default(),
             last_widget_move_at: None,
             config_save_in_flight: false,
@@ -356,6 +363,16 @@ impl Snapdash {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Noop => Task::none(),
+
+            Message::SettingsPageSelected(page) => {
+                self.settings_page = page;
+                Task::none()
+            }
+
+            Message::SettingsSearchChanged(value) => {
+                self.settings_search = value;
+                Task::none()
+            }
 
             Message::EntitySearchChanged(value) => {
                 self.entity_search_query = value;
