@@ -1,3 +1,4 @@
+use crate::ha;
 use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
@@ -51,16 +52,13 @@ pub struct Snapdash {
     pub config: Config,
     pub theme: ThemeKind,
 
-    pub ha_connected: bool,
-    pub ha_connection: Option<HaConnectionConfig>,
-    pub ha_token_draft: String,
+    pub ha: ha::HaState,
 
     pub windows: HashMap<window::Id, WindowState>,
 
     pub theme_options: Vec<ThemeKind>,
     pub status: String,
 
-    pub entities_by_id: HashMap<String, EntityState>,
     pub entity_windows: HashMap<String, window::Id>,
     pub boot_open_done: bool,
 
@@ -142,13 +140,10 @@ impl Snapdash {
         Self {
             config: Config::default(),
             theme: ThemeKind::default(),
-            ha_connected: false,
-            ha_connection: None,
-            ha_token_draft: String::new(),
+            ha: ha::HaState::default(),
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
             windows: HashMap::new(),
-            entities_by_id: HashMap::new(),
             entity_windows: HashMap::new(),
             boot_open_done: false,
             settings_sensors: Vec::new(),
@@ -192,7 +187,8 @@ impl Snapdash {
 
     pub fn rebuild_settings_sensors(&mut self) {
         let mut sensors: Vec<SettingsSensor> = self
-            .entities_by_id
+            .ha
+            .entities
             .values()
             .filter(|e| e.entity_id.starts_with("sensor."))
             .map(|e| {
@@ -249,7 +245,7 @@ impl Snapdash {
             _ => None,
         });
 
-        let ha = if let Some(connection) = &self.ha_connection {
+        let ha = if let Some(connection) = &self.ha.connection {
             Subscription::run_with(connection.clone(), crate::ha::ws::connect).map(Message::HaEvent)
         } else {
             Subscription::none()
@@ -320,13 +316,13 @@ impl Snapdash {
     }
 
     fn apply_initial_states(&mut self, states: Vec<EntityState>) {
-        self.entities_by_id.clear();
+        self.ha.entities.clear();
 
         for state in states {
             let entity_id = state.entity_id.clone();
 
             self.set_window_entity_state(&entity_id, &state, false);
-            self.entities_by_id.insert(entity_id, state.clone());
+            self.ha.entities.insert(entity_id, state.clone());
         }
         self.rebuild_settings_sensors();
     }
@@ -336,7 +332,7 @@ impl Snapdash {
 
         self.set_window_entity_state(&entity_id, &new_state, true);
 
-        let should_refresh_settings = match self.entities_by_id.get(&entity_id) {
+        let should_refresh_settings = match self.ha.entities.get(&entity_id) {
             None => true,
             Some(old) => {
                 let old_is_sensor = old.entity_id.starts_with("sensor.");
@@ -352,7 +348,7 @@ impl Snapdash {
             }
         };
 
-        self.entities_by_id.insert(entity_id, new_state);
+        self.ha.entities.insert(entity_id, new_state);
 
         if should_refresh_settings {
             self.rebuild_settings_sensors();
@@ -392,12 +388,12 @@ impl Snapdash {
     fn handle_ha_event(&mut self, ev: HaEvent) -> Task<Message> {
         match ev {
             HaEvent::Connected => {
-                self.ha_connected = true;
+                self.ha.connected = true;
                 self.set_status("HA Connected", LogType::Info);
                 Task::none()
             }
             HaEvent::Disconnected(error) => {
-                self.ha_connected = false;
+                self.ha.connected = false;
                 let (msg, severity) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, severity);
                 Task::none()
@@ -411,8 +407,8 @@ impl Snapdash {
                 Task::none()
             }
             HaEvent::AuthFailed(error) => {
-                self.ha_connected = false;
-                self.ha_connection = None;
+                self.ha.connected = false;
+                self.ha.connection = None;
                 self.config.ha_token_present = false;
 
                 let (msg, _) = Snapdash::ha_error_status(&error);
@@ -487,8 +483,8 @@ impl Snapdash {
                     Ok(_) => {
                         self.set_status("Token deleted from key-chain", LogType::Info);
                         self.config.ha_token_present = false;
-                        self.ha_connection = None;
-                        self.ha_connected = false;
+                        self.ha.connection = None;
+                        self.ha.connected = false;
                         tracing::warn!("HA disconected due to erased token.");
                     }
                     Err(s) => {
@@ -575,7 +571,7 @@ impl Snapdash {
             }
 
             Message::HaTokenDraftChanged(val) => {
-                self.ha_token_draft = val;
+                self.ha.token_draft = val;
                 Task::none()
             }
 
@@ -585,7 +581,7 @@ impl Snapdash {
                 if let WindowKind::Entity { entity_id } = &kind {
                     entity.entity_id = entity_id.clone();
 
-                    if let Some(st) = self.entities_by_id.get(&entity.entity_id) {
+                    if let Some(st) = self.ha.entities.get(&entity.entity_id) {
                         entity.last = Some(st.clone());
                     }
 
@@ -618,11 +614,11 @@ impl Snapdash {
 
             Message::SavePressed => {
                 self.set_status("Saving...", LogType::DoNotLog);
-                if !self.ha_token_draft.trim().is_empty() {
-                    match token::set(self.ha_token_draft.trim()) {
+                if !self.ha.token_draft.trim().is_empty() {
+                    match token::set(self.ha.token_draft.trim()) {
                         Ok(()) => {
                             self.config.ha_token_present = true;
-                            self.ha_token_draft.clear();
+                            self.ha.token_draft.clear();
                             self.set_status("Token saved into keychain.", LogType::Info);
                         }
                         Err(e) => {
@@ -716,8 +712,8 @@ impl Snapdash {
 
             Message::ConnectHa => {
                 if !self.config.ha_enabled() {
-                    self.ha_connected = false;
-                    self.ha_connection = None;
+                    self.ha.connected = false;
+                    self.ha.connection = None;
                     self.set_status("HA not enabled (missing token/URL)", LogType::Error);
                     return Task::none();
                 }
@@ -725,8 +721,8 @@ impl Snapdash {
                 let stored_token = match token::get() {
                     Ok(t) => t,
                     Err(e) => {
-                        self.ha_connected = false;
-                        self.ha_connection = None;
+                        self.ha.connected = false;
+                        self.ha.connection = None;
                         self.set_status(format!("Missing token in keychain {e}"), LogType::Error);
                         self.config.ha_token_present = false;
 
@@ -739,10 +735,10 @@ impl Snapdash {
                     token: stored_token,
                 };
 
-                if self.ha_connection.as_ref() != Some(&next_connection) {
-                    self.ha_connected = false;
+                if self.ha.connection.as_ref() != Some(&next_connection) {
+                    self.ha.connected = false;
                     self.set_status("Connecting to HA ...", LogType::Info);
-                    self.ha_connection = Some(next_connection);
+                    self.ha.connection = Some(next_connection);
                 }
 
                 Task::none()

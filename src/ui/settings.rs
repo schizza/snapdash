@@ -23,7 +23,7 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
         _ => "Enter your token ...",
     };
 
-    let token: Element<Message> = components::mac_input(placeholder, &snap.ha_token_draft, p)
+    let token: Element<Message> = components::mac_input(placeholder, &snap.ha.token_draft, p)
         .on_input(Message::HaTokenDraftChanged)
         .into();
 

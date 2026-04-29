@@ -18,7 +18,7 @@ pub fn window_content<'a>(
         WindowKind::Entity { .. } => crate::ui::entity_window::view(
             &win.entity,
             app.theme.palette(),
-            app.ha_connected,
+            app.ha.connected,
             app.update.is_available(),
         ),
         WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
