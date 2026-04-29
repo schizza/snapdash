@@ -3,7 +3,7 @@ use iced::widget::{MouseArea, mouse_area};
 use iced::window;
 use iced::{Alignment, Element, Length};
 
-use crate::app::{Message, UpdateState, WindowKind, WindowState};
+use crate::app::{Message, WindowKind, WindowState};
 use crate::ui::icon::Icon;
 use crate::ui::theme::{UiTheme, icon_button};
 
@@ -19,7 +19,7 @@ pub fn window_content<'a>(
             &win.entity,
             app.theme.palette(),
             app.ha_connected,
-            app.update_state == UpdateState::UpdateAvailable,
+            app.update.is_available(),
         ),
         WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
     }

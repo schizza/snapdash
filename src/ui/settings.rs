@@ -1,11 +1,12 @@
 use iced::widget::{column, container, mouse_area, row};
 use iced::{Element, Length, mouse};
 
-use crate::app::{Message, Snapdash, UpdateState};
+use crate::app::{Message, Snapdash};
 use crate::theme::metric;
 use crate::ui::components::{active_sensor_section, dimmed, sensors_section};
 use crate::ui::icon::Icon;
 use crate::ui::theme::UiTheme;
+use crate::ui::update_view;
 use crate::update;
 
 use super::components;
@@ -38,15 +39,9 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
         dimmed("Status", p).into()
     };
 
-    let update_icon = match snap.update_state {
-        UpdateState::Unknown => Icon::Unknown.text(ui_theme).size(12).color(p.danger),
+    let update_icon = update_view::status_icon(snap.update.state, ui_theme, p);
 
-        UpdateState::UptoDate => Icon::Check.text(ui_theme).size(12).color(p.success),
-
-        UpdateState::UpdateAvailable => Icon::Download.text(ui_theme).size(12).color(p.danger),
-    };
-
-    let update_icon: Element<Message> = if snap.update_state == UpdateState::UpdateAvailable {
+    let update_icon: Element<Message> = if snap.update.is_available() {
         mouse_area(update_icon)
             .on_press(Message::OpenReleaseNotes)
             .interaction(iced::mouse::Interaction::Pointer)
@@ -127,7 +122,7 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
         p,
     );
 
-    let update_badge: Element<Message> = if snap.update_state == UpdateState::UpdateAvailable {
+    let update_badge: Element<Message> = if snap.update.is_available() {
         mouse_area(components::badge("Update Available", p))
             .on_press(Message::OpenReleaseNotes)
             .interaction(mouse::Interaction::Pointer)

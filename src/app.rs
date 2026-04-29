@@ -46,13 +46,6 @@ pub enum FocusDirection {
     Previous,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum UpdateState {
-    Unknown,
-    UptoDate,
-    UpdateAvailable,
-}
-
 #[derive(Debug)]
 pub struct Snapdash {
     pub config: Config,
@@ -77,9 +70,7 @@ pub struct Snapdash {
 
     pub entity_search_query: String,
 
-    pub update_state: UpdateState,
-    pub latest_release: Option<update::GitHubRelease>,
-    pub release_notes_items: Vec<iced::widget::markdown::Item>,
+    pub update: update::UpdateStatus,
 
     pub last_widget_move_at: Option<std::time::Instant>,
 
@@ -164,9 +155,7 @@ impl Snapdash {
             selected_widgets: HashSet::new(),
             active_settings_sensors: Vec::new(),
             entity_search_query: String::new(),
-            update_state: UpdateState::Unknown,
-            latest_release: None,
-            release_notes_items: Vec::new(),
+            update: update::UpdateStatus::default(),
             last_widget_move_at: None,
             config_save_in_flight: false,
             config_save_pending: false,
@@ -790,16 +779,7 @@ impl Snapdash {
             }
 
             Message::LastVersionChecked(release) => {
-                if let Some(release) = release {
-                    self.update_state = UpdateState::UpdateAvailable;
-                    self.release_notes_items =
-                        iced::widget::markdown::parse(&release.body).collect();
-                    self.latest_release = Some(release);
-                } else {
-                    self.update_state = UpdateState::UptoDate;
-                    self.latest_release = None;
-                    self.release_notes_items.clear();
-                }
+                self.update.record_check(release);
                 Task::none()
             }
             Message::OpenReleaseNotes => {
