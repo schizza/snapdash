@@ -4,7 +4,8 @@ use iced::window;
 use iced::{Alignment, Element, Length};
 
 use crate::app::{Message, UpdateState, WindowKind, WindowState};
-use crate::ui::theme::{UiTheme, icon_button, icon_text};
+use crate::ui::icon::Icon;
+use crate::ui::theme::{UiTheme, icon_button};
 
 /// Returns window content based on its kind (`Settings` / `Entity`).
 pub fn window_content<'a>(
@@ -43,11 +44,7 @@ pub fn with_gear_overlay<'a>(
 
     let ui_theme = UiTheme::from(&app.theme);
 
-    let gear_icon = iced::widget::text("⚙")
-        .size(28)
-        .style(icon_text(ui_theme, 1.0));
-
-    let gear_button = iced::widget::button(gear_icon)
+    let gear_button = iced::widget::button(Icon::Gear.text(ui_theme))
         .padding(8)
         .on_press(Message::OpenSettings)
         .style(icon_button(ui_theme, 1.0));

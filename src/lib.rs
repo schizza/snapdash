@@ -9,6 +9,19 @@ pub mod update;
 
 use iced::daemon;
 
+/// Inter Variable — body / UI font. SIL OFL, see assets/fonts/Inter-LICENSE.txt.
+/// Bundled so every platform renders the same neogrotesk shapes (closest
+/// open-source substitute for SF Pro). Avoids OS-default font drift between
+/// macOS (San Francisco), Windows (Segoe UI), and Linux (whatever fontconfig
+/// resolves).
+const INTER_VARIABLE: &[u8] = include_bytes!("../assets/fonts/InterVariable.ttf");
+
+/// Lucide icon font. ISC, see assets/fonts/Lucide-LICENSE.txt. Used for the
+/// gear/settings icon (and any future icons) so we don't fall through to the
+/// per-OS Symbols/Emoji font which renders ⚙ as a colored emoji on Windows
+/// and as outlines on macOS/Linux.
+pub const LUCIDE_FONT: &[u8] = include_bytes!("../assets/fonts/lucide.ttf");
+
 /// Build and run the Snapdash daemon.
 ///
 /// On Linux we install a custom `.style()` that clears the surface to
@@ -26,7 +39,10 @@ pub fn run() -> iced::Result {
         app::Snapdash::update,
         app::Snapdash::view,
     )
-    .subscription(app::Snapdash::subscription);
+    .subscription(app::Snapdash::subscription)
+    .default_font(iced::Font::with_name("Inter"))
+    .font(INTER_VARIABLE)
+    .font(LUCIDE_FONT);
 
     #[cfg(target_os = "linux")]
     let builder = builder.style(app::Snapdash::style);

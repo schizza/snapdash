@@ -4,12 +4,15 @@ use iced::{Element, Length, mouse};
 use crate::app::{Message, Snapdash, UpdateState};
 use crate::theme::metric;
 use crate::ui::components::{active_sensor_section, dimmed, sensors_section};
+use crate::ui::icon::Icon;
+use crate::ui::theme::UiTheme;
 use crate::update;
 
 use super::components;
 
 pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     let p = snap.theme.palette();
+    let ui_theme = UiTheme::from(&snap.theme);
 
     let url: Element<Message> = components::mac_input("Home Assistant URL", &snap.config.ha_url, p)
         .on_input(Message::HaUrlChanged)
@@ -24,7 +27,7 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
         .into();
 
     let token_delete: Element<Message> =
-        components::icon("🗑", p, Some(Message::HaTokenDelete)).into();
+        components::icon(Icon::Trash.text(ui_theme), p, Some(Message::HaTokenDelete)).into();
 
     let theme_picker: Element<Message> =
         components::themepicker(snap.theme_options.clone(), snap.theme, p).into();
@@ -36,27 +39,11 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     };
 
     let update_icon = match snap.update_state {
-        UpdateState::Unknown => dimmed(
-            '?',
-            crate::theme::Palette {
-                text_dim: iced::Color::from_rgb8(0, 0, 255),
-                ..p
-            },
-        ),
-        UpdateState::UptoDate => dimmed(
-            '✓',
-            crate::theme::Palette {
-                text_dim: iced::Color::from_rgb8(0, 255, 0),
-                ..p
-            },
-        ),
-        UpdateState::UpdateAvailable => dimmed(
-            '⤓',
-            crate::theme::Palette {
-                text_dim: iced::Color::from_rgb8(255, 0, 0),
-                ..p
-            },
-        ),
+        UpdateState::Unknown => Icon::Unknown.text(ui_theme).size(12).color(p.danger),
+
+        UpdateState::UptoDate => Icon::Check.text(ui_theme).size(12).color(p.success),
+
+        UpdateState::UpdateAvailable => Icon::Download.text(ui_theme).size(12).color(p.danger),
     };
 
     let update_icon: Element<Message> = if snap.update_state == UpdateState::UpdateAvailable {
@@ -157,7 +144,11 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
         )
         .on_press(Message::StartDrag(id)),
         update_badge,
-        components::icon("✕", p, Some(Message::CloseWindow(id))),
+        components::icon(
+            Icon::Close.text(ui_theme),
+            p,
+            Some(Message::CloseWindow(id))
+        ),
     ]
     .spacing(metric::GAP)
     .align_y(iced::Alignment::Center)

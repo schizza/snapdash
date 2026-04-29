@@ -132,14 +132,14 @@ pub fn pill_button(
     b
 }
 
-pub fn icon(
-    label: &'static str,
+pub fn icon<'a>(
+    content: impl Into<Element<'static, Message>>,
     p: Palette,
     on_press: Option<Message>,
 ) -> iced::widget::Button<'static, Message> {
     use iced::widget::button::Status;
 
-    let content = container(text(label))
+    let content = container(content)
         .width(Length::Shrink)
         .height(Length::Fill)
         .center_x(Length::Shrink)
