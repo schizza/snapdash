@@ -5,6 +5,7 @@ use super::components;
 use crate::app::{EntityWindowState, Message};
 use crate::theme::Palette;
 use crate::ui::format::format_entity_value;
+use crate::widget_size::WidgetSize;
 
 fn pretty_name(entity_id: &str) -> &str {
     entity_id.split('.').nth(1).unwrap_or(entity_id)
@@ -22,7 +23,7 @@ fn format_main_value(
     }
 }
 
-fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
+fn status_line(p: Palette, connected: bool, size: WidgetSize) -> Element<'static, Message> {
     let dot = components::status_dot(p, connected);
 
     let label = if connected {
@@ -34,7 +35,7 @@ fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
     row![
         dot,
         text(label)
-            .size(12)
+            .size(size.detail_font())
             .style(move |_: &iced::Theme| iced::widget::text::Style {
                 color: Some(if connected { p.text_dim } else { p.danger })
             }),
@@ -62,6 +63,7 @@ pub fn view(
     p: Palette,
     connected: bool,
     update: bool,
+    size: crate::widget_size::WidgetSize,
 ) -> Element<'_, Message> {
     let (friendly, main_opt, detail) = format_main_value(state);
     let update_icon: Element<Message> = if update {
@@ -80,18 +82,22 @@ pub fn view(
     };
     let title_text = if let Some(name) = friendly {
         row![
-            column![text(name).size(14).style(move |_: &iced::Theme| {
-                iced::widget::text::Style {
-                    color: Some(p.text_secondary),
-                }
-            }),]
+            column![
+                text(name)
+                    .size(size.title_font())
+                    .style(move |_: &iced::Theme| {
+                        iced::widget::text::Style {
+                            color: Some(p.text_secondary),
+                        }
+                    }),
+            ]
             .width(iced::Fill),
             update_icon
         ]
     } else {
         row![
             text(pretty_name(&state.entity_id))
-                .size(14)
+                .size(size.title_font())
                 .style(move |_: &iced::Theme| iced::widget::text::Style {
                     color: Some(p.text_secondary),
                 }),
@@ -101,14 +107,14 @@ pub fn view(
 
     let main = main_opt.unwrap_or_else(|| "-".into());
     let value_text = text(main)
-        .size(44)
+        .size(size.value_font())
         .style(move |_: &iced::Theme| iced::widget::text::Style {
             color: Some(p.text_primary),
         });
 
     let detail_line: Element<'static, Message> = if let Some(d) = detail {
         text(d)
-            .size(12)
+            .size(size.detail_font())
             .style(move |_: &iced::Theme| iced::widget::text::Style {
                 color: Some(p.text_dim),
             })
@@ -121,11 +127,11 @@ pub fn view(
 
     let inner = column![
         title_text,
-        space().height(6),
+        space().height(size.title_value_gap()),
         value_text,
-        space().height(10),
+        space().height(size.value_detail_gap()),
         detail_line,
-        status_line(p, connected),
+        status_line(p, connected, size),
     ]
     .spacing(0)
     .width(Length::Fill);

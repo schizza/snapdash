@@ -31,43 +31,43 @@ impl WidgetSize {
         }
     }
 
-    pub fn value_font(self) -> u16 {
+    pub fn value_font(self) -> f32 {
         match self {
-            Self::Small => 28,
-            Self::Normal => 36,
-            Self::Large => 44,
+            Self::Small => 28.0,
+            Self::Normal => 36.0,
+            Self::Large => 44.0,
         }
     }
 
-    pub fn title_font(self) -> u16 {
+    pub fn title_font(self) -> f32 {
         match self {
-            Self::Small => 11,
-            Self::Normal => 12,
-            Self::Large => 14,
+            Self::Small => 11.0,
+            Self::Normal => 12.0,
+            Self::Large => 14.0,
         }
     }
 
-    pub fn detail_font(self) -> u16 {
+    pub fn detail_font(self) -> f32 {
         match self {
-            Self::Small => 10,
-            Self::Normal => 11,
-            Self::Large => 12,
+            Self::Small => 10.0,
+            Self::Normal => 11.0,
+            Self::Large => 12.0,
         }
     }
 
-    pub fn title_value_gap(self) -> u16 {
+    pub fn title_value_gap(self) -> f32 {
         match self {
-            Self::Small => 4,
-            Self::Normal => 5,
-            Self::Large => 6,
+            Self::Small => 4.0,
+            Self::Normal => 5.0,
+            Self::Large => 6.0,
         }
     }
 
-    pub fn value_detail_gap(self) -> u16 {
+    pub fn value_detail_gap(self) -> f32 {
         match self {
-            Self::Small => 6,
-            Self::Normal => 8,
-            Self::Large => 10,
+            Self::Small => 6.0,
+            Self::Normal => 8.0,
+            Self::Large => 10.0,
         }
     }
 }
