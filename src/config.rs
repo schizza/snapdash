@@ -18,6 +18,8 @@ pub struct Config {
     pub widgets: Vec<String>,
     #[serde(default)]
     pub widget_positions: HashMap<String, WidgetPosition>,
+    #[serde(default)]
+    pub widget_size: crate::widget_size::WidgetSize,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq)]
@@ -35,6 +37,7 @@ impl Default for Config {
             debug_overlay: false,
             widgets: Vec::new(),
             widget_positions: HashMap::new(),
+            widget_size: crate::widget_size::WidgetSize::default(),
         }
     }
 }
