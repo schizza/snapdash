@@ -610,7 +610,8 @@ impl Snapdash {
                         continue;
                     }
 
-                    let mut win_settings = window_settings(iced::Size::new(240.0, 160.0), false);
+                    let mut win_settings =
+                        window_settings(self.config.widget_size.window_size(), false);
                     if let Some(saved) = self.config.widget_positions.get(&widget) {
                         win_settings.position =
                             window::Position::Specific(iced::Point::new(saved.x, saved.y));
