@@ -1,9 +1,11 @@
+use iced::alignment::Horizontal::Left;
 use iced::widget::{column, row};
 use iced::{Element, Length};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
 use crate::ui::components;
+use crate::widget_size::WidgetSize;
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let p = snap.theme.palette();
@@ -11,13 +13,32 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let theme_picker: Element<Message> =
         components::themepicker(snap.theme_options.clone(), snap.theme, p).into();
 
-    let body = components::subcard(
-        row![components::section("Theme", p), theme_picker]
-            .spacing(metric::GAP)
-            .align_y(iced::Alignment::Center)
-            .into(),
-        p,
-    );
+    let theme_row: Element<Message> = row![
+        components::body("Theme", p),
+        iced::widget::space().width(iced::Length::Fill),
+        theme_picker
+    ]
+    .align_y(iced::Alignment::Center)
+    .into();
+
+    let size_picker: Element<Message> = iced::widget::pick_list(
+        WidgetSize::ALL.to_vec(),
+        Some(snap.config.widget_size),
+        Message::WidgetSizeChanged,
+    )
+    .into();
+
+    let size_row: Element<Message> = row![
+        components::body("Widget size",p),
+        components::helper("Affects new and currently open entity widgets", p),
+        iced::widget::space().width(Length::Fill),
+        size_picker
+    ].align_y(iced::Alignment::Center)
+    .spacing(metric::GAP)
+    .into();
+
+
+    let body = column![theme_row, size_row].spacing(metric::GAP).into();
 
     column![components::title(snap.settings_page.label(), p), body]
         .spacing(metric::PAD)

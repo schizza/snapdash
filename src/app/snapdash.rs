@@ -5,6 +5,7 @@ use crate::logger::LogType;
 use crate::ui::platform::window_settings;
 use crate::ui::settings::*;
 use crate::update;
+use crate::widget_size::WidgetSize;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -118,6 +119,8 @@ pub enum Message {
     OpenConfigFile,
     OpenLogFile,
     ResetConfig,
+
+    WidgetSizeChanged(WidgetSize),
 }
 
 impl Default for Snapdash {
@@ -367,6 +370,25 @@ impl Snapdash {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Noop => Task::none(),
+
+            Message::WidgetSizeChanged(size) => {
+                self.config.widget_size = size;
+
+                // Resize all currently opend entity widgets so the change is
+                // immediately visible
+
+                let mut tasks: Vec<Task<Message>> = self
+                    .windows
+                    .iter()
+                    .filter_map(|(id, win)| {
+                        matches!(win.kind, WindowKind::Entity { .. })
+                            .then(|| iced::window::resize::<Message>(*id, size.window_size()))
+                    })
+                    .collect();
+
+                tasks.push(self.save_config());
+                Task::batch(tasks)
+            }
 
             Message::OpenConfigFile => {
                 match Config::config_path() {
