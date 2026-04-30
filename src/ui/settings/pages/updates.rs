@@ -12,10 +12,15 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let p = snap.theme.palette();
     let ui_theme = UiTheme::from(&snap.theme);
 
+    let latest = match &snap.update.latest_release {
+        Some(release) => release.tag_name.to_string(),
+        None => "N/A".to_string(),
+    };
+
     let status_text = match snap.update.state {
-        UpdateState::Unknown => "Checking for updates…",
-        UpdateState::UptoDate => "You're up to date.",
-        UpdateState::UpdateAvailable => "A new version is available.",
+        UpdateState::Unknown => "Checking for updates…".to_string(),
+        UpdateState::UptoDate => "You're up to date.".to_string(),
+        UpdateState::UpdateAvailable => format!("A new version is available: {}", latest),
     };
 
     let status_row = row![
@@ -28,7 +33,11 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let actions: Element<Message> = if snap.update.is_available() {
         row![
             components::pill_button("Check for updates", p, Some(Message::CheckForUpdate),),
-            components::pill_button("Show release notes", p, Some(Message::OpenReleaseNotes),),
+            components::pill_button(
+                "Show latest release notes",
+                p,
+                Some(Message::OpenReleaseNotes),
+            ),
         ]
         .spacing(metric::GAP)
         .into()
@@ -37,8 +46,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     };
 
     let body = column![
-        components::section("Version", p),
-        components::label(format!("Current: {}", update::CURRENT_VERSION), p,),
+        components::label(format!("Current version: {}", update::CURRENT_VERSION), p,),
         iced::widget::space().height(metric::GAP),
         status_row,
         iced::widget::space().height(metric::GAP),
@@ -47,7 +55,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     .spacing(metric::GAP);
 
     column![
-        components::title(&snap.settings_page.label(), p),
+        components::title(snap.settings_page.label(), p),
         components::subcard(body.into(), p)
     ]
     .spacing(metric::PAD)

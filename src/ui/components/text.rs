@@ -1,0 +1,89 @@
+use iced::widget::{container, text};
+use iced::{Background, Border, Element};
+
+use crate::app::Message;
+use crate::theme::Palette;
+use crate::ui::icon::Icon;
+use crate::ui::theme::UiTheme;
+
+pub fn title(label: &'static str, p: Palette) -> text::Text<'static> {
+    text(label).color(p.text_primary).size(22)
+}
+
+pub fn section(label: &'static str, p: Palette) -> text::Text<'static> {
+    text(label).color(p.text_secondary).size(16)
+}
+
+// Left here intentionaly, usage in future?
+pub fn label<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
+    text(label.into()).color(p.text_secondary).size(14)
+}
+
+pub fn badge<'a>(label: impl Into<String>, p: Palette) -> Element<'a, Message> {
+    container(
+        text(label.into())
+            .size(11)
+            .style(move |_: &iced::Theme| iced::widget::text::Style {
+                color: Some(p.accent),
+            }),
+    )
+    .padding([3, 10])
+    .style(move |_| container::Style {
+        background: Some(Background::Color(p.accent_tint)),
+        border: Border {
+            radius: 999.0.into(),
+            width: 1.0,
+            color: p.accent,
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
+pub fn badge_with_icon<'a>(
+    label: impl Into<String>,
+    icon: Icon,
+    ui_theme: UiTheme,
+) -> Element<'a, Message> {
+    let p = ui_theme.palette;
+
+    let label_text =
+        text(label.into())
+            .size(11)
+            .style(move |_: &iced::Theme| iced::widget::text::Style {
+                color: Some(p.accent),
+            });
+
+    let inner: Element<'a, Message> =
+        iced::widget::row![icon.text(ui_theme).color(p.accent).size(11), label_text]
+            .spacing(6)
+            .align_y(iced::Alignment::Center)
+            .into();
+
+    container(inner)
+        .padding([3, 10])
+        .style(move |_| container::Style {
+            background: Some(Background::Color(p.accent_tint)),
+            border: Border {
+                radius: 999.0.into(),
+                width: 1.0,
+                color: p.accent,
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+pub fn dimmed<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
+    text(label.into()).color(p.text_dim).size(10)
+}
+
+/// Standard body text, used for setting row labels and descriptions
+/// that need to be readable at arm's length.
+pub fn body<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
+    text(label.into()).color(p.text_body).size(13)
+}
+
+pub fn helper<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
+    text(label.into()).color(p.text_dim).size(11)
+}

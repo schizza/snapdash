@@ -32,7 +32,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         p,
     );
 
-    let body = components::subcard(
+    let body: Element<'a, Message> =
         //column![
              row![
                 container(available_panel).width(Length::FillPortion(1)),
@@ -42,15 +42,13 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
             .align_y(iced::Alignment::Start)
             .width(Length::Fill)
             .height(Length::Fill)
-        
-        //.spacing(metric::GAP)
-        //.width(Length::Fill)
-        //.height(Length::Fill)
-        .into(),
-        p,
-    );
+            .into();
 
-    column![components::title(&snap.settings_page.label(), p), body]
+    //.spacing(metric::GAP)
+    //.width(Length::Fill)
+    //.height(Length::Fill)
+
+    column![components::title(snap.settings_page.label(), p), body]
         .width(Length::Fill)
         .spacing(metric::GAP)
         .into()

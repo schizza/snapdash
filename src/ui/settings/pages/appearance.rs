@@ -19,7 +19,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         p,
     );
 
-    column![components::title(&snap.settings_page.label(), p), body]
+    column![components::title(snap.settings_page.label(), p), body]
         .spacing(metric::PAD)
         .width(Length::Fill)
         .into()

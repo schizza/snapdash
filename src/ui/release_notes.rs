@@ -4,8 +4,11 @@ use iced::{Alignment, Element, Length, window};
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
 use crate::ui::components;
+use crate::ui::icon::Icon;
+use crate::ui::theme::UiTheme;
 
 pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
+    let ui_theme = UiTheme::from(&snap.theme);
     let p = snap.theme.palette();
 
     let title_text = match &snap.update.latest_release {
@@ -20,7 +23,11 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     let title_bar: Element<Message> = row![
         mouse_area(container(title_widget).width(Length::Fill).padding([4, 0]))
             .on_press(Message::StartDrag(id)),
-        components::icon("✕", p, Some(Message::CloseWindow(id))),
+        components::pill_button(
+            Icon::Close.text(ui_theme),
+            p,
+            Some(Message::CloseWindow(id))
+        ),
     ]
     .align_y(Alignment::Center)
     .into();

@@ -66,13 +66,7 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
     .height(Length::Fill)
     .into();
 
-    let outer = column![
-        chrome::title_bar(snap, id),
-        body,
-        chrome::save_row(snap),
-        chrome::status_row(snap),
-    ]
-    .spacing(14);
+    let outer = column![chrome::title_bar(snap, id), body, chrome::footer(snap)].spacing(14);
 
     components::card(outer.into(), p)
 }

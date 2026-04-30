@@ -25,7 +25,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         .into();
 
     let token_delete: Element<Message> =
-        components::icon(Icon::Trash.text(ui_theme), p, Some(Message::HaTokenDelete)).into();
+        components::pill_button(Icon::Trash.text(ui_theme), p, Some(Message::HaTokenDelete)).into();
 
     let body = components::subcard(
         column![
@@ -40,7 +40,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         p,
     );
 
-    column![components::title(&snap.settings_page.label(), p), body]
+    column![components::title(snap.settings_page.label(), p), body]
         .width(Length::Fill)
         .spacing(metric::GAP)
         .into()

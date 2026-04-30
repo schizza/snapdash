@@ -10,8 +10,8 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let config_row = row![
         column![
-            components::label("Edit config.json", p),
-            components::dimmed("Open the JSON config in your default editor.", p,),
+            components::body("Edit config.json", p),
+            components::helper("Open the JSON config in your default editor.", p,),
         ]
         .width(iced::Length::Fill),
         components::pill_button("Open", p, Some(Message::OpenConfigFile)),
@@ -21,8 +21,8 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let log_row = row![
         column![
-            components::label("Open log directory", p),
-            components::dimmed("Browse runtime logs in your file manager.", p,),
+            components::body("Open log directory", p),
+            components::helper("Browse runtime logs in your file manager.", p,),
         ]
         .width(iced::Length::Fill),
         components::pill_button("Open", p, Some(Message::OpenLogFile)),
@@ -32,14 +32,14 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let reset_row = row![
         column![
-            components::label("Reset to defaults", p),
-            components::dimmed(
+            components::body("Reset to defaults", p),
+            components::helper(
                 "Wipes HA URL, theme and selected sensors. The HA token in the keychain is not affected.",
                 p,
             ),
         ]
         .width(iced::Length::Fill),
-        components::pill_button("Reset", p, Some(Message::ResetConfig)),
+        components::pill_button_with("Reset", components::ButtonVisual::pill(p).bg(p.danger).bg_hovered(p.danger), Some(Message::ResetConfig)),
     ]
     .align_y(iced::Alignment::Center)
     .spacing(metric::GAP);
@@ -53,7 +53,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     ]
     .spacing(metric::GAP);
     column![
-        components::title(&snap.settings_page.label(), p),
+        components::title(snap.settings_page.label(), p),
         components::subcard(body.into(), p)
     ]
     .spacing(metric::PAD)
