@@ -5,6 +5,7 @@ pub mod logger;
 pub mod theme;
 pub mod ui;
 pub mod update;
+pub mod widget_size;
 
 use iced::daemon;
 
