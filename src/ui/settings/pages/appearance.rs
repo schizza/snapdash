@@ -29,16 +29,16 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     .into();
 
     let size_row: Element<Message> = row![
-        components::body("Widget size",p),
+        components::body("Widget size", p),
         components::helper("Affects new and currently open entity widgets", p),
         iced::widget::space().width(Length::Fill),
         size_picker
-    ].align_y(iced::Alignment::Center)
+    ]
+    .align_y(iced::Alignment::Center)
     .spacing(metric::GAP)
     .into();
 
-
-    let body = column![theme_row, size_row].spacing(metric::GAP).into();
+    let body: Element<Message> = column![theme_row, size_row].spacing(metric::GAP).into();
 
     column![components::title(snap.settings_page.label(), p), body]
         .spacing(metric::PAD)
