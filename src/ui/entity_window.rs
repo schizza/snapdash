@@ -32,17 +32,21 @@ fn status_line(p: Palette, connected: bool, size: WidgetSize) -> Element<'static
         "disconected"
     };
 
-    row![
-        dot,
-        text(label)
-            .size(size.detail_font())
-            .style(move |_: &iced::Theme| iced::widget::text::Style {
-                color: Some(if connected { p.text_dim } else { p.danger })
-            }),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center)
-    .into()
+    if size == WidgetSize::Small {
+        row![dot].spacing(8).align_y(Alignment::Center).into()
+    } else {
+        row![
+            dot,
+            text(label)
+                .size(size.detail_font())
+                .style(move |_: &iced::Theme| iced::widget::text::Style {
+                    color: Some(if connected { p.text_dim } else { p.danger })
+                }),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+    }
 }
 
 fn pulse_border(p: Palette, pulse: f32) -> iced::Color {
@@ -130,7 +134,13 @@ pub fn view(
         space().height(size.title_value_gap()),
         value_text,
         space().height(size.value_detail_gap()),
-        detail_line,
+        {
+            if size == WidgetSize::Small {
+                space().height(0).width(0).into()
+            } else {
+                detail_line
+            }
+        },
         status_line(p, connected, size),
     ]
     .spacing(0)

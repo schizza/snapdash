@@ -380,10 +380,8 @@ impl Snapdash {
                 let mut tasks: Vec<Task<Message>> = self
                     .windows
                     .iter()
-                    .filter_map(|(id, win)| {
-                        matches!(win.kind, WindowKind::Entity { .. })
-                            .then(|| iced::window::resize::<Message>(*id, size.window_size()))
-                    })
+                    .filter(|(_id, win)| matches!(win.kind, WindowKind::Entity { .. }))
+                    .map(|(id, _win)| iced::window::resize::<Message>(*id, size.window_size()))
                     .collect();
 
                 tasks.push(self.save_config());
