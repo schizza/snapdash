@@ -32,10 +32,9 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         p,
     );
 
-    components::subcard(
-        column![
-            components::section("Sensors", p),
-            row![
+    let body = components::subcard(
+        //column![
+             row![
                 container(available_panel).width(Length::FillPortion(1)),
                 container(selected_panel).width(Length::FillPortion(1)),
             ]
@@ -43,11 +42,16 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
             .align_y(iced::Alignment::Start)
             .width(Length::Fill)
             .height(Length::Fill)
-        ]
-        .spacing(metric::GAP)
-        .width(Length::Fill)
-        .height(Length::Fill)
+        
+        //.spacing(metric::GAP)
+        //.width(Length::Fill)
+        //.height(Length::Fill)
         .into(),
         p,
-    )
+    );
+
+    column![components::title(&snap.settings_page.label(), p), body]
+        .width(Length::Fill)
+        .spacing(metric::GAP)
+        .into()
 }

@@ -61,6 +61,7 @@ pub fn card(content: Element<Message>, p: Palette) -> Element<Message> {
 pub fn subcard(content: Element<Message>, p: Palette) -> Element<Message> {
     container(content)
         .padding(12)
+        .width(Length::Fill)
         .style(move |_| container::Style {
             background: Some(Background::Color(p.card_2)),
             border: Border {
@@ -286,9 +287,9 @@ pub fn section(label: &'static str, p: Palette) -> text::Text<'static> {
 }
 
 // Left here intentionaly, usage in future?
-// pub fn label<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
-//     text(label.into()).color(p.text_secondary).size(14)
-// }
+pub fn label<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
+    text(label.into()).color(p.text_secondary).size(14)
+}
 
 pub fn badge<'a>(label: impl Into<String>, p: Palette) -> Element<'a, Message> {
     container(

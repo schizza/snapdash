@@ -586,7 +586,7 @@ impl Snapdash {
                 // Linux (where we render our own shader shadow) and is a
                 // no-op on macOS/Windows (where the OS clips + draws its
                 // own shadow). See `ui::platform` module doc.
-                let settings = window_settings(iced::Size::new(820.0, 950.0), false);
+                let settings = window_settings(iced::Size::new(920.0, 640.0), true);
                 let (id, task_id) = window::open(settings);
                 task_id.map(move |_| Message::WindowOpened {
                     id,

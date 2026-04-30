@@ -1,5 +1,5 @@
-use iced::Element;
 use iced::widget::{column, row};
+use iced::{Element, Length};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
@@ -20,7 +20,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let status_row = row![
         update_view::status_icon(snap.update.state, ui_theme, p),
-        components::dimmed(status_text, p),
+        components::label(status_text, p),
     ]
     .spacing(metric::GAP)
     .align_y(iced::Alignment::Center);
@@ -38,7 +38,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let body = column![
         components::section("Version", p),
-        components::dimmed(format!("Current: {}", update::CURRENT_VERSION), p,),
+        components::label(format!("Current: {}", update::CURRENT_VERSION), p,),
         iced::widget::space().height(metric::GAP),
         status_row,
         iced::widget::space().height(metric::GAP),
@@ -46,5 +46,11 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     ]
     .spacing(metric::GAP);
 
-    components::subcard(body.into(), p)
+    column![
+        components::title(&snap.settings_page.label(), p),
+        components::subcard(body.into(), p)
+    ]
+    .spacing(metric::PAD)
+    .width(Length::Fill)
+    .into()
 }

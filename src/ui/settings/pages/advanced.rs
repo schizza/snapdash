@@ -1,5 +1,5 @@
-use iced::Element;
 use iced::widget::{column, row};
+use iced::{Element, Length};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
@@ -10,7 +10,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let config_row = row![
         column![
-            components::dimmed("Edit config.json", p),
+            components::label("Edit config.json", p),
             components::dimmed("Open the JSON config in your default editor.", p,),
         ]
         .width(iced::Length::Fill),
@@ -21,7 +21,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let log_row = row![
         column![
-            components::dimmed("Open log directory", p),
+            components::label("Open log directory", p),
             components::dimmed("Browse runtime logs in your file manager.", p,),
         ]
         .width(iced::Length::Fill),
@@ -32,7 +32,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let reset_row = row![
         column![
-            components::dimmed("Reset to defaults", p),
+            components::label("Reset to defaults", p),
             components::dimmed(
                 "Wipes HA URL, theme and selected sensors. The HA token in the keychain is not affected.",
                 p,
@@ -45,7 +45,6 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     .spacing(metric::GAP);
 
     let body = column![
-        components::section("Configuration", p),
         config_row,
         iced::widget::space().height(metric::GAP),
         log_row,
@@ -53,6 +52,11 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         reset_row,
     ]
     .spacing(metric::GAP);
-
-    components::subcard(body.into(), p)
+    column![
+        components::title(&snap.settings_page.label(), p),
+        components::subcard(body.into(), p)
+    ]
+    .spacing(metric::PAD)
+    .width(Length::Fill)
+    .into()
 }

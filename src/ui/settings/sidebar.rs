@@ -22,7 +22,18 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         nav = nav.push(nav_item(page, snap.settings_page == page, p));
     }
 
-    column![search, nav].spacing(metric::GAP).width(180).into()
+    let inner = column![search, nav].spacing(metric::GAP);
+
+    iced::widget::container(inner)
+        .width(200)
+        .height(Length::Fill)
+        .padding(iced::Padding {
+            bottom: 0.0,
+            right: metric::PAD,
+            left: 0.0,
+            top: 0.0,
+        })
+        .into()
 }
 
 fn nav_item(page: SettingsPage, is_active: bool, p: Palette) -> Button<'static, Message> {

@@ -1,5 +1,5 @@
-use iced::Element;
 use iced::widget::{column, row};
+use iced::{Element, Length};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
@@ -27,7 +27,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let token_delete: Element<Message> =
         components::icon(Icon::Trash.text(ui_theme), p, Some(Message::HaTokenDelete)).into();
 
-    components::subcard(
+    let body = components::subcard(
         column![
             components::section("Home Assistant", p),
             url,
@@ -38,5 +38,10 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         .spacing(metric::GAP)
         .into(),
         p,
-    )
+    );
+
+    column![components::title(&snap.settings_page.label(), p), body]
+        .width(Length::Fill)
+        .spacing(metric::GAP)
+        .into()
 }
