@@ -415,7 +415,7 @@ impl Snapdash {
                         .unwrap_or_else(|join_err| {
                             Err(anyhow::anyhow!("task join failed: {join_err}"))
                         })
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| format!("{e:#}"))
                     },
                     Message::UpdateInstelled,
                 )
@@ -428,6 +428,7 @@ impl Snapdash {
             }
 
             Message::UpdateInstelled(Err(e)) => {
+                tracing::error!(error = %e, "update install failed");
                 self.set_status(format!("Update failed: {e}"), LogType::Error);
                 self.update.install = crate::update::InstallProgress::Failed(e);
                 Task::none()

@@ -92,6 +92,7 @@ pub fn download_to(url: &str, dest_dir: &Path, file_name: &str) -> Result<PathBu
         .build()
         .context("build http clinet")?
         .get(url)
+        .header("Accept", "application/octet-stream, text/plain")
         .send()
         .context("HTTP GET")?
         .error_for_status()

@@ -36,30 +36,45 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         }
         InstallProgress::Idle => iced::widget::space().width(0).height(0).into(),
         InstallProgress::Installing => {
-            iced::widget::row![components::body("Installing update...", p),]
-                .align_y(iced::Alignment::Center)
-                .into()
+            components::pill_button("Installing update ...", p, None).into()
         }
         InstallProgress::ReadyToRestart(exec) => {
             let exec = exec.clone();
-            iced::widget::row![
-                components::body("Update installed.", p),
-                iced::widget::space().width(metric::GAP),
-                components::pill_button("Restart now", p, Some(Message::RestartAfterUpdate(exec)),),
-            ]
-            .align_y(iced::Alignment::Center)
-            .into()
+            components::pill_button("Restart now", p, Some(Message::RestartAfterUpdate(exec)))
+                .into()
         }
-        InstallProgress::Failed(err) => iced::widget::column![
-            iced::widget::text(format!("Update failed: {err}"))
-                .size(13)
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(p.danger),
-                }),
-            iced::widget::space().height(metric::GAP),
-            components::pill_button("Retry", p, Some(Message::InstallUpdate)),
-        ]
-        .into(),
+        InstallProgress::Failed(_err) => {
+            components::pill_button("Retry", p, Some(Message::InstallUpdate)).into()
+        }
+    };
+
+    // Error message line — zobrazí se JEN když je Failed
+    let install_error: Option<Element<Message>> = match &snap.update.install {
+        InstallProgress::Failed(err) => Some(
+            iced::widget::container(
+                iced::widget::text(format!("Update failed: {err}"))
+                    .size(12)
+                    .style(move |_: &iced::Theme| iced::widget::text::Style {
+                        color: Some(p.danger),
+                    }),
+            )
+            .padding([8, 12])
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(iced::Color {
+                    a: 0.12,
+                    ..p.danger
+                })),
+                border: iced::Border {
+                    radius: 6.0.into(),
+                    width: 1.0,
+                    color: iced::Color { a: 0.4, ..p.danger },
+                },
+                ..Default::default()
+            })
+            .width(iced::Length::Fill)
+            .into(),
+        ),
+        _ => None,
     };
 
     let actions: Element<Message> = if !snap.update.is_available() {
@@ -85,7 +100,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         .spacing(metric::GAP)
         .into()
     };
-    let body = column![
+    let mut body = column![
         components::label(format!("Current version: {}", update::CURRENT_VERSION), p,),
         iced::widget::space().height(metric::GAP),
         status_row,
@@ -93,6 +108,11 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         actions,
     ]
     .spacing(metric::GAP);
+
+    if let Some(err_box) = install_error {
+        body = body.push(err_box);
+        body = body.push(iced::widget::space().height(metric::GAP));
+    }
 
     column![
         components::title(snap.settings_page.label(), p),
