@@ -32,6 +32,7 @@ pub struct UpdateStatus {
     /// Pre-parsed markdown for the release-notes view. Cached here so we
     /// don't re-parse on every render.
     pub release_notes_items: Vec<iced::widget::markdown::Item>,
+    pub install: InstallProgress,
 }
 
 impl UpdateStatus {
@@ -55,6 +56,22 @@ impl UpdateStatus {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum InstallProgress {
+    /// Nothing in flight. Default state.
+    #[default]
+    Idle,
+
+    /// Download + verify + install task is running.
+    Installing,
+
+    /// New binary is on disk; the restart task will re-exec.
+    ReadyToRestart(std::path::PathBuf),
+
+    /// Something failed
+    Failed(String),
 }
 
 /// Fetch the latest GitHub release and return it only if its tag differs
