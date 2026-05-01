@@ -4430,7 +4430,7 @@ dependencies = [
 
 [[package]]
 name = "snapdash"
-version = "0.0.4-b1"
+version = "0.0.5"
 dependencies = [
  "anyhow",
  "chrono",
