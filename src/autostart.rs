@@ -64,3 +64,26 @@ pub fn is_enabled() -> bool {
         .and_then(|h| h.is_enabled().context("query OS"))
         .unwrap_or(false)
 }
+
+/// Reconciles the user's stored preference with the OS-level
+/// registration. Called once after config loads — if the user wants
+/// autostart but the OS has forgotten about us (manual deletion of the
+/// plist/.desktop, app moved between filesystems), re-register
+/// silently. Logs but doesn't fail boot on errors.
+pub fn validate_state(want_enabled: bool) {
+    let os_enabled = is_enabled();
+
+    if want_enabled && !os_enabled {
+        match enable() {
+            Ok(_) => tracing::info!("autostart re-registered after drift"),
+            Err(e) => tracing::warn!(error = %e, "autostart re-register failed"),
+        }
+    } else if !want_enabled && os_enabled {
+        // User stored "off" but OS still has us listed — cleanup so
+        // we don't silently autostart against the user's preference.
+        match disable() {
+            Ok(_) => tracing::info!("autostart cleared (config says off)"),
+            Err(e) => tracing::warn!(error = %e, "autostart clear failed"),
+        }
+    }
+}

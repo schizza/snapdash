@@ -547,6 +547,7 @@ impl Snapdash {
                     Ok(cfg) => {
                         self.theme = cfg.theme;
                         self.config = cfg;
+                        crate::autostart::validate_state(self.config.autostart);
                         self.rebuild_selected_widgets();
                         self.set_status("Config loaded", LogType::Info);
 
