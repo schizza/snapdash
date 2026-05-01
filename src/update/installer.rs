@@ -21,7 +21,7 @@ const REPO_NAME: &str = "snapdash";
 fn target_pattern() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("macos-aarch64"),
-        ("linux", "x86_64") => Some("linux-x86-64"),
+        ("linux", "x86_64") => Some("linux-x86_64"),
         ("windows", "x86_64") => Some("windows-x86_64"),
         _ => None,
     }
