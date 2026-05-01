@@ -43,15 +43,19 @@ pub fn mac_input<'a>(
         })
 }
 
-/// wrapper aroud pick_list
-pub fn themepicker(
-    options: Vec<ThemeKind>,
-    selected: ThemeKind,
+pub fn picker<'a, V, M>(
+    options: Vec<V>,
+    selected: V,
+    on_select: impl Fn(V) -> M + 'a,
     p: Palette,
-) -> pick_list::PickList<'static, ThemeKind, Vec<ThemeKind>, ThemeKind, Message> {
+) -> pick_list::PickList<'a, V, Vec<V>, V, M>
+where
+    V: ToString + PartialEq + Clone + 'a,
+    M: Clone + 'a,
+{
     use iced::widget::pick_list::Status;
 
-    pick_list(options, Some(selected), Message::ThemeSelected)
+    pick_list(options, Some(selected), on_select)
         .padding([0, 12])
         .style(move |_theme, status| {
             let bg = p.card_2;
@@ -92,4 +96,13 @@ pub fn themepicker(
             selected_background: iced::Background::Color(p.accent_tint),
             shadow: p.shadow,
         })
+}
+
+/// wrapper aroud pick_list
+pub fn themepicker(
+    options: Vec<ThemeKind>,
+    selected: ThemeKind,
+    p: Palette,
+) -> pick_list::PickList<'static, ThemeKind, Vec<ThemeKind>, ThemeKind, Message> {
+    picker(options, selected, Message::ThemeSelected, p)
 }

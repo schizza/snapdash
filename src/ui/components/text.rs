@@ -1,5 +1,5 @@
-use iced::widget::{container, text};
-use iced::{Background, Border, Element};
+use iced::widget::{column, container, text};
+use iced::{Background, Border, Element, Length};
 
 use crate::app::Message;
 use crate::theme::Palette;
@@ -86,4 +86,14 @@ pub fn body<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
 
 pub fn helper<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
     text(label.into()).color(p.text_dim).size(11)
+}
+
+pub fn body_with_helper<'a, S: Into<String>>(
+    label: S,
+    helper_text: S,
+    p: Palette,
+) -> Element<'a, Message> {
+    column![body(label, p), helper(helper_text, p)]
+        .width(Length::Fill)
+        .into()
 }

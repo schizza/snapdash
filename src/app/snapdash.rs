@@ -5,6 +5,7 @@ use crate::logger::LogType;
 use crate::ui::platform::window_settings;
 use crate::ui::settings::*;
 use crate::update;
+use crate::widget_size::WidgetSize;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -118,6 +119,8 @@ pub enum Message {
     OpenConfigFile,
     OpenLogFile,
     ResetConfig,
+
+    WidgetSizeChanged(WidgetSize),
 }
 
 impl Default for Snapdash {
@@ -368,6 +371,27 @@ impl Snapdash {
         match message {
             Message::Noop => Task::none(),
 
+            Message::WidgetSizeChanged(size) => {
+                self.config.widget_size = size;
+
+                // Route the card size through the platform helper so Linux gets its
+                // SHADOW_MARGIN inflation (composited.rs:28) — same path as
+                // window_settings() uses at window creation time. Without this,
+                // resizing on Linux drops the shadow margin and clips drawn shadows.
+                let card = size.window_size();
+                let surface = crate::ui::platform::window_size(card.width, card.height);
+
+                let mut tasks: Vec<Task<Message>> = self
+                    .windows
+                    .iter()
+                    .filter(|(_id, win)| matches!(win.kind, WindowKind::Entity { .. }))
+                    .map(|(id, _win)| iced::window::resize::<Message>(*id, surface))
+                    .collect();
+
+                tasks.push(self.save_config());
+                Task::batch(tasks)
+            }
+
             Message::OpenConfigFile => {
                 match Config::config_path() {
                     Ok(path) => {
@@ -383,8 +407,18 @@ impl Snapdash {
             Message::OpenLogFile => {
                 match crate::logger::log_path() {
                     Ok(path) => {
-                        if let Err(e) = open::that(&path) {
-                            tracing::warn!(path = %path.display(), error = %e, "failed to open log file")
+                        #[cfg(target_os = "windows")]
+                        {
+                            let target = path.parent().map(|p| p.to_path_buf()).unwrap_or(path);
+                            if let Err(e) = open::that(&target) {
+                                tracing::warn!(path = %target.display(), error = %e, "failed to open log dir");
+                            }
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            if let Err(e) = open::that(&path) {
+                                tracing::warn!(path = %path.display(), error = %e, "failed to open log file")
+                            }
                         }
                     }
                     Err(e) => tracing::warn!(error = %e, "no log path available"),
@@ -610,7 +644,8 @@ impl Snapdash {
                         continue;
                     }
 
-                    let mut win_settings = window_settings(iced::Size::new(240.0, 160.0), false);
+                    let mut win_settings =
+                        window_settings(self.config.widget_size.window_size(), false);
                     if let Some(saved) = self.config.widget_positions.get(&widget) {
                         win_settings.position =
                             window::Position::Specific(iced::Point::new(saved.x, saved.y));
