@@ -121,6 +121,10 @@ pub enum Message {
     ResetConfig,
 
     WidgetSizeChanged(WidgetSize),
+
+    InstallUpdate,
+    UpdateInstelled(Result<std::path::PathBuf, String>),
+    RestartAfterUpdate(std::path::PathBuf),
 }
 
 impl Default for Snapdash {
@@ -370,6 +374,77 @@ impl Snapdash {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Noop => Task::none(),
+
+            Message::InstallUpdate => {
+                // Guard
+                if !matches!(
+                    self.update.install,
+                    crate::update::InstallProgress::Idle
+                        | crate::update::InstallProgress::Failed(_)
+                ) {
+                    return Task::none();
+                }
+
+                self.update.install = crate::update::InstallProgress::Installing;
+                self.set_status("Installing update...", LogType::Info);
+
+                Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(|| -> anyhow::Result<std::path::PathBuf> {
+                            use crate::update::installer;
+
+                            let release = installer::fetch_latest_release()?;
+                            let asset = installer::pick_asset(&release)?;
+
+                            let temp = tempfile::tempdir()?;
+                            let archive = installer::download_to(
+                                &asset.archive_url,
+                                temp.path(),
+                                &asset.archive_name,
+                            )?;
+                            let checksum = installer::download_to(
+                                &asset.checksum_url,
+                                temp.path(),
+                                &format!("{}.sha256", asset.archive_name),
+                            )?;
+
+                            installer::verify_checksum(&archive, &checksum)?;
+                            installer::install_archive(&archive)
+                        })
+                        .await
+                        .unwrap_or_else(|join_err| {
+                            Err(anyhow::anyhow!("task join failed: {join_err}"))
+                        })
+                        .map_err(|e| format!("{e:#}"))
+                    },
+                    Message::UpdateInstelled,
+                )
+            }
+
+            Message::UpdateInstelled(Ok(new_exec)) => {
+                self.update.install = crate::update::InstallProgress::ReadyToRestart(new_exec);
+                self.set_status("Update installed - restart to apply.", LogType::Info);
+                Task::none()
+            }
+
+            Message::UpdateInstelled(Err(e)) => {
+                tracing::error!(error = %e, "update install failed");
+                self.set_status(format!("Update failed: {e}"), LogType::Error);
+                self.update.install = crate::update::InstallProgress::Failed(e);
+                Task::none()
+            }
+
+            Message::RestartAfterUpdate(exec) => {
+                if let Err(e) = std::process::Command::new(&exec).spawn() {
+                    tracing::error!(error = %e, exec = %exec.display(), "failed to spawn new exec");
+                    self.update.install = crate::update::InstallProgress::Failed(format!(
+                        "Failed to launch new version: {e}"
+                    ));
+                    return Task::none();
+                }
+                // Exit daemon - new install will take-over
+                std::process::exit(0);
+            }
 
             Message::WidgetSizeChanged(size) => {
                 self.config.widget_size = size;

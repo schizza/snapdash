@@ -1,10 +1,11 @@
+use iced::widget::text::IntoFragment;
 use iced::widget::{column, container, text};
 use iced::{Background, Border, Element, Length};
 
 use crate::app::Message;
 use crate::theme::Palette;
 use crate::ui::icon::Icon;
-use crate::ui::theme::UiTheme;
+use crate::ui::theme::{MessageType, UiTheme};
 
 pub fn title(label: &'static str, p: Palette) -> text::Text<'static> {
     text(label).color(p.text_primary).size(22)
@@ -96,4 +97,42 @@ pub fn body_with_helper<'a, S: Into<String>>(
     column![body(label, p), helper(helper_text, p)]
         .width(Length::Fill)
         .into()
+}
+
+pub fn message<'a>(
+    content: impl IntoFragment<'a>,
+    msg_type: MessageType,
+    p: Palette,
+) -> Element<'a, Message> {
+    let color = match msg_type {
+        MessageType::Error => p.danger,
+        MessageType::Warning => p.accent,
+        MessageType::Success => p.success,
+    };
+
+    iced::widget::container(
+        iced::widget::text(content)
+            .size(12)
+            .style(move |_: &iced::Theme| iced::widget::text::Style { color: Some(color) }),
+    )
+    .padding([8, 12])
+    .style(move |_| iced::widget::container::Style {
+        background: Some(iced::Background::Color(iced::Color { a: 0.12, ..color })),
+        border: iced::Border {
+            radius: 6.0.into(),
+            width: 1.0,
+            color: iced::Color { a: 0.4, ..color },
+        },
+        ..Default::default()
+    })
+    .width(iced::Length::Fill)
+    .into()
+}
+
+pub fn error_message<'a>(content: impl IntoFragment<'a>, p: Palette) -> Element<'a, Message> {
+    message(content, MessageType::Error, p)
+}
+
+pub fn success_message<'a>(content: impl IntoFragment<'a>, p: Palette) -> Element<'a, Message> {
+    message(content, MessageType::Success, p)
 }
