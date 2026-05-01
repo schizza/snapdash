@@ -1,6 +1,7 @@
 //! Self-update domain: version polling against GitHub releases plus the
 //! observable status the UI consumes.
 
+pub mod installer;
 use serde::Deserialize;
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");

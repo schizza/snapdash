@@ -41,6 +41,7 @@ reqwest = { version = "0.13.2", default-features = false, features = [
     "json",
     "rustls",
     "http2",
+    "blocking",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -61,7 +62,9 @@ tracing-appender = "0.2.5"
 rand = "0.10.1"
 open = "5.3.4"
 self_update = { version = "0.44.0", features = [
-    "rustls", "archive-tar", "compression-flate2"
+    "rustls",
+    "archive-tar",
+    "compression-flate2",
 ] }
 sha2 = "0.11.0"
 tempfile = "3.27.0"
