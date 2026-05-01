@@ -82,7 +82,7 @@ fn try_file_writer() -> anyhow::Result<(NonBlocking, WorkerGuard)> {
     Ok((non_blocking, guard))
 }
 
-fn log_path() -> anyhow::Result<PathBuf> {
+pub fn log_path() -> anyhow::Result<PathBuf> {
     let proj = ProjectDirs::from("dev", "snapdash", "Snapdash")
         .context("cannot determine app data dir")?;
     Ok(proj.data_dir().join("debug.log"))

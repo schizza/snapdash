@@ -6,6 +6,13 @@ pub struct UiTheme {
     pub palette: crate::theme::Palette,
 }
 
+#[derive(Copy, Clone)]
+pub enum MessageType {
+    Warning,
+    Error,
+    Success,
+}
+
 impl From<&ThemeKind> for UiTheme {
     fn from(theme: &ThemeKind) -> Self {
         Self {

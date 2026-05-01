@@ -1,37 +1,22 @@
+use crate::ha;
 use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
 use crate::ui::platform::window_settings;
+use crate::ui::settings::*;
 use crate::update;
-use std::collections::{HashMap, HashSet, VecDeque};
+use crate::widget_size::WidgetSize;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use iced::window;
 use iced::{Element, Task};
-use iced::{Subscription, window};
 
-use crate::config::Config;
-use crate::secrets;
+use crate::config::{Config, WidgetPosition};
+use crate::ha::token;
 use crate::theme::ThemeKind;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum WindowKind {
-    Settings,
-    Entity { entity_id: String },
-    ReleaseNotes,
-}
-#[derive(Debug)]
-pub struct WindowState {
-    pub kind: WindowKind,
-    pub entity: EntityWindowState,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct EntityWindowState {
-    pub entity_id: String,
-    pub last: Option<EntityState>,
-    pub pulse: f32, // TODO: Replace with Animation/spring. Currently just easy "animation paramter" (0..1), později nahradit Animation/spring
-    pub hovered: bool,
-}
+use super::window::{EntityWindowState, WindowKind, WindowState, find_window_id};
 
 #[derive(Debug, Clone)]
 pub struct SettingsSensor {
@@ -46,29 +31,18 @@ pub enum FocusDirection {
     Previous,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum UpdateState {
-    Unknown,
-    UptoDate,
-    UpdateAvailable,
-}
-
 #[derive(Debug)]
 pub struct Snapdash {
     pub config: Config,
     pub theme: ThemeKind,
 
-    pub ha_connected: bool,
-    pub ha_connection: Option<HaConnectionConfig>,
-    pub ha_token_draft: String,
+    pub ha: ha::HaState,
 
     pub windows: HashMap<window::Id, WindowState>,
-    pub pending_opens: VecDeque<WindowKind>,
 
     pub theme_options: Vec<ThemeKind>,
     pub status: String,
 
-    pub entities_by_id: HashMap<String, EntityState>,
     pub entity_windows: HashMap<String, window::Id>,
     pub boot_open_done: bool,
 
@@ -77,10 +51,15 @@ pub struct Snapdash {
     pub active_settings_sensors: Vec<SettingsSensor>,
 
     pub entity_search_query: String,
+    pub settings_page: SettingsPage,
+    pub settings_search: String,
 
-    pub update_state: UpdateState,
-    pub latest_release: Option<update::GitHubRelease>,
-    pub release_notes_items: Vec<iced::widget::markdown::Item>,
+    pub update: update::UpdateStatus,
+
+    pub last_widget_move_at: Option<std::time::Instant>,
+
+    pub config_save_in_flight: bool,
+    pub config_save_pending: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -94,7 +73,10 @@ pub enum Message {
     QuitApp,
     WindowClosed(window::Id),
     //  WindowOpened(window::Id, WindowKind),
-    WindowActuallyOpened(window::Id),
+    WindowOpened {
+        id: window::Id,
+        kind: WindowKind,
+    },
 
     ThemeSelected(ThemeKind),
     SaveConfig,
@@ -123,8 +105,26 @@ pub enum Message {
     },
 
     EntitySearchChanged(String),
+    SettingsPageSelected(SettingsPage),
+    SettingsSearchChanged(String),
     CheckForUpdate,
     LastVersionChecked(Option<update::GitHubRelease>),
+
+    WidgetMoved {
+        id: window::Id,
+        position: iced::Point,
+    },
+    PersistWidgetPositions,
+
+    OpenConfigFile,
+    OpenLogFile,
+    ResetConfig,
+
+    WidgetSizeChanged(WidgetSize),
+
+    InstallUpdate,
+    UpdateInstelled(Result<std::path::PathBuf, String>),
+    RestartAfterUpdate(std::path::PathBuf),
 }
 
 impl Default for Snapdash {
@@ -138,40 +138,24 @@ impl Snapdash {
         Self {
             config: Config::default(),
             theme: ThemeKind::default(),
-            ha_connected: false,
-            ha_connection: None,
-            ha_token_draft: String::new(),
+            ha: ha::HaState::default(),
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
             windows: HashMap::new(),
-            pending_opens: VecDeque::new(),
-            entities_by_id: HashMap::new(),
             entity_windows: HashMap::new(),
             boot_open_done: false,
             settings_sensors: Vec::new(),
             selected_widgets: HashSet::new(),
             active_settings_sensors: Vec::new(),
             entity_search_query: String::new(),
-            update_state: UpdateState::Unknown,
-            latest_release: None,
-            release_notes_items: Vec::new(),
+            settings_page: SettingsPage::default(),
+            settings_search: String::new(),
+            update: update::UpdateStatus::default(),
+            last_widget_move_at: None,
+            config_save_in_flight: false,
+            config_save_pending: false,
         }
     }
-    pub fn boot() -> (Self, Task<Message>) {
-        let state = Self::new();
-
-        let load_task = Task::perform(
-            async { Config::load().await.map_err(|e| e.to_string()) },
-            Message::ConfigLoad,
-        );
-
-        let check_update = Task::perform(update::get_latest_version(), Message::LastVersionChecked);
-
-        let tasks = Task::batch([load_task, check_update]);
-
-        (state, tasks)
-    }
-
     fn rebuild_active_settings_sensors(&mut self) {
         self.active_settings_sensors = self
             .settings_sensors
@@ -188,7 +172,8 @@ impl Snapdash {
 
     pub fn rebuild_settings_sensors(&mut self) {
         let mut sensors: Vec<SettingsSensor> = self
-            .entities_by_id
+            .ha
+            .entities
             .values()
             .filter(|e| e.entity_id.starts_with("sensor."))
             .map(|e| {
@@ -223,60 +208,6 @@ impl Snapdash {
         self.rebuild_active_settings_sensors();
     }
 
-    pub fn subscription(&self) -> Subscription<Message> {
-        let redraw_events_needed = self.windows.values().any(|win| win.entity.pulse > 0.0);
-
-        let redraw_events = if redraw_events_needed {
-            iced::event::listen_raw(|event, _status, id| match event {
-                iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                    Some(Message::WindowRedraw(id))
-                }
-                _ => None,
-            })
-        } else {
-            Subscription::none()
-        };
-
-        let ha = if let Some(connection) = &self.ha_connection {
-            Subscription::run_with(connection.clone(), crate::ha::ws::connect).map(Message::HaEvent)
-        } else {
-            Subscription::none()
-        };
-
-        let keyboard_events = iced::event::listen_raw(|event, _status, id| {
-            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
-                modifiers,
-                ..
-            }) = event
-            else {
-                return None;
-            };
-
-            let direction = if modifiers.shift() {
-                FocusDirection::Previous
-            } else {
-                FocusDirection::Next
-            };
-
-            Some(Message::FocusMove {
-                window_id: id,
-                direction,
-            })
-        });
-
-        let check_for_update =
-            iced::time::every(Duration::from_hours(1)).map(|_| Message::CheckForUpdate);
-
-        Subscription::batch([
-            window::close_events().map(Message::WindowClosed),
-            redraw_events,
-            keyboard_events,
-            ha,
-            check_for_update,
-        ])
-    }
-
     fn handle_redraw_requested(&mut self, id: window::Id) {
         let Some(window) = self.windows.get_mut(&id) else {
             return;
@@ -307,13 +238,13 @@ impl Snapdash {
     }
 
     fn apply_initial_states(&mut self, states: Vec<EntityState>) {
-        self.entities_by_id.clear();
+        self.ha.entities.clear();
 
         for state in states {
             let entity_id = state.entity_id.clone();
 
             self.set_window_entity_state(&entity_id, &state, false);
-            self.entities_by_id.insert(entity_id, state.clone());
+            self.ha.entities.insert(entity_id, state.clone());
         }
         self.rebuild_settings_sensors();
     }
@@ -323,7 +254,7 @@ impl Snapdash {
 
         self.set_window_entity_state(&entity_id, &new_state, true);
 
-        let should_refresh_settings = match self.entities_by_id.get(&entity_id) {
+        let should_refresh_settings = match self.ha.entities.get(&entity_id) {
             None => true,
             Some(old) => {
                 let old_is_sensor = old.entity_id.starts_with("sensor.");
@@ -339,7 +270,7 @@ impl Snapdash {
             }
         };
 
-        self.entities_by_id.insert(entity_id, new_state);
+        self.ha.entities.insert(entity_id, new_state);
 
         if should_refresh_settings {
             self.rebuild_settings_sensors();
@@ -379,12 +310,12 @@ impl Snapdash {
     fn handle_ha_event(&mut self, ev: HaEvent) -> Task<Message> {
         match ev {
             HaEvent::Connected => {
-                self.ha_connected = true;
+                self.ha.connected = true;
                 self.set_status("HA Connected", LogType::Info);
                 Task::none()
             }
             HaEvent::Disconnected(error) => {
-                self.ha_connected = false;
+                self.ha.connected = false;
                 let (msg, severity) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, severity);
                 Task::none()
@@ -398,17 +329,13 @@ impl Snapdash {
                 Task::none()
             }
             HaEvent::AuthFailed(error) => {
-                self.ha_connected = false;
-                self.ha_connection = None;
+                self.ha.connected = false;
+                self.ha.connection = None;
                 self.config.ha_token_present = false;
 
                 let (msg, _) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, LogType::Error);
-
-                let cfg = self.config.clone();
-                Task::perform(async move { cfg.save_async().await }, |_| {
-                    Message::SaveConfig
-                })
+                self.save_config()
             }
         }
     }
@@ -425,33 +352,174 @@ impl Snapdash {
         self.status = msg;
     }
 
-    fn is_entity_window_open(&self, entity_id: &str) -> bool {
-        self.entity_windows.contains_key(entity_id)
+    fn save_config(&mut self) -> Task<Message> {
+        if self.config_save_in_flight {
+            // newer state will be picked up when the in-flight save completes.
+
+            self.config_save_pending = true;
+            return Task::none();
+        }
+
+        self.config_save_in_flight = true;
+        let cfg = self.config.clone();
+        Task::perform(async move { cfg.save_async().await }, |_| {
+            Message::SaveConfig
+        })
     }
 
-    fn find_window_id(
-        windows: &HashMap<window::Id, WindowState>,
-        kind: WindowKind,
-        name: Option<&str>,
-    ) -> Option<window::Id> {
-        windows
-            .iter()
-            .find(|(_, v)| {
-                if v.kind != kind {
-                    return false;
-                }
-
-                match name {
-                    None => true,
-                    Some(exp) => exp == v.entity.entity_id,
-                }
-            })
-            .map(|(&id, _)| id)
+    fn is_entity_window_open(&self, entity_id: &str) -> bool {
+        self.entity_windows.contains_key(entity_id)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Noop => Task::none(),
+
+            Message::InstallUpdate => {
+                // Guard
+                if !matches!(
+                    self.update.install,
+                    crate::update::InstallProgress::Idle
+                        | crate::update::InstallProgress::Failed(_)
+                ) {
+                    return Task::none();
+                }
+
+                self.update.install = crate::update::InstallProgress::Installing;
+                self.set_status("Installing update...", LogType::Info);
+
+                Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(|| -> anyhow::Result<std::path::PathBuf> {
+                            use crate::update::installer;
+
+                            let release = installer::fetch_latest_release()?;
+                            let asset = installer::pick_asset(&release)?;
+
+                            let temp = tempfile::tempdir()?;
+                            let archive = installer::download_to(
+                                &asset.archive_url,
+                                temp.path(),
+                                &asset.archive_name,
+                            )?;
+                            let checksum = installer::download_to(
+                                &asset.checksum_url,
+                                temp.path(),
+                                &format!("{}.sha256", asset.archive_name),
+                            )?;
+
+                            installer::verify_checksum(&archive, &checksum)?;
+                            installer::install_archive(&archive)
+                        })
+                        .await
+                        .unwrap_or_else(|join_err| {
+                            Err(anyhow::anyhow!("task join failed: {join_err}"))
+                        })
+                        .map_err(|e| format!("{e:#}"))
+                    },
+                    Message::UpdateInstelled,
+                )
+            }
+
+            Message::UpdateInstelled(Ok(new_exec)) => {
+                self.update.install = crate::update::InstallProgress::ReadyToRestart(new_exec);
+                self.set_status("Update installed - restart to apply.", LogType::Info);
+                Task::none()
+            }
+
+            Message::UpdateInstelled(Err(e)) => {
+                tracing::error!(error = %e, "update install failed");
+                self.set_status(format!("Update failed: {e}"), LogType::Error);
+                self.update.install = crate::update::InstallProgress::Failed(e);
+                Task::none()
+            }
+
+            Message::RestartAfterUpdate(exec) => {
+                if let Err(e) = std::process::Command::new(&exec).spawn() {
+                    tracing::error!(error = %e, exec = %exec.display(), "failed to spawn new exec");
+                    self.update.install = crate::update::InstallProgress::Failed(format!(
+                        "Failed to launch new version: {e}"
+                    ));
+                    return Task::none();
+                }
+                // Exit daemon - new install will take-over
+                std::process::exit(0);
+            }
+
+            Message::WidgetSizeChanged(size) => {
+                self.config.widget_size = size;
+
+                // Route the card size through the platform helper so Linux gets its
+                // SHADOW_MARGIN inflation (composited.rs:28) — same path as
+                // window_settings() uses at window creation time. Without this,
+                // resizing on Linux drops the shadow margin and clips drawn shadows.
+                let card = size.window_size();
+                let surface = crate::ui::platform::window_size(card.width, card.height);
+
+                let mut tasks: Vec<Task<Message>> = self
+                    .windows
+                    .iter()
+                    .filter(|(_id, win)| matches!(win.kind, WindowKind::Entity { .. }))
+                    .map(|(id, _win)| iced::window::resize::<Message>(*id, surface))
+                    .collect();
+
+                tasks.push(self.save_config());
+                Task::batch(tasks)
+            }
+
+            Message::OpenConfigFile => {
+                match Config::config_path() {
+                    Ok(path) => {
+                        if let Err(e) = open::that(&path) {
+                            tracing::warn!(path = %path.display(), error = %e, "failed to open config file")
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "no config path available"),
+                }
+                Task::none()
+            }
+
+            Message::OpenLogFile => {
+                match crate::logger::log_path() {
+                    Ok(path) => {
+                        #[cfg(target_os = "windows")]
+                        {
+                            let target = path.parent().map(|p| p.to_path_buf()).unwrap_or(path);
+                            if let Err(e) = open::that(&target) {
+                                tracing::warn!(path = %target.display(), error = %e, "failed to open log dir");
+                            }
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            if let Err(e) = open::that(&path) {
+                                tracing::warn!(path = %path.display(), error = %e, "failed to open log file")
+                            }
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "no log path available"),
+                }
+                Task::none()
+            }
+
+            Message::ResetConfig => {
+                self.config = Config::default();
+                self.ha.connection = None;
+                self.ha.connected = false;
+                self.selected_widgets.clear();
+                self.rebuild_active_settings_sensors();
+                self.set_status("Configuration rest to defaults", LogType::Info);
+                self.save_config()
+            }
+
+            Message::SettingsPageSelected(page) => {
+                self.settings_page = page;
+                Task::none()
+            }
+
+            Message::SettingsSearchChanged(value) => {
+                self.settings_search = value;
+                Task::none()
+            }
 
             Message::EntitySearchChanged(value) => {
                 self.entity_search_query = value;
@@ -459,12 +527,12 @@ impl Snapdash {
             }
 
             Message::HaTokenDelete => {
-                match secrets::delete_ha_token() {
+                match token::delete() {
                     Ok(_) => {
                         self.set_status("Token deleted from key-chain", LogType::Info);
                         self.config.ha_token_present = false;
-                        self.ha_connection = None;
-                        self.ha_connected = false;
+                        self.ha.connection = None;
+                        self.ha.connected = false;
                         tracing::warn!("HA disconected due to erased token.");
                     }
                     Err(s) => {
@@ -542,37 +610,34 @@ impl Snapdash {
                         Message::OpenEntity(entity_id.clone())
                     }));
                 }
+
                 self.rebuild_selected_widgets();
                 // save widget configuration
-                task.push(Task::perform(async {}, |_| Message::SaveConfig));
+                task.push(self.save_config());
 
                 Task::batch(task)
             }
 
             Message::HaTokenDraftChanged(val) => {
-                self.ha_token_draft = val;
+                self.ha.token_draft = val;
                 Task::none()
             }
 
-            Message::WindowActuallyOpened(id) => {
-                if let Some(kind) = self.pending_opens.pop_front() {
-                    let mut entity = EntityWindowState::default();
+            Message::WindowOpened { id, kind } => {
+                let mut entity = EntityWindowState::default();
 
-                    if let WindowKind::Entity { entity_id } = &kind {
-                        entity.entity_id = entity_id.clone();
+                if let WindowKind::Entity { entity_id } = &kind {
+                    entity.entity_id = entity_id.clone();
 
-                        if let Some(st) = self.entities_by_id.get(&entity.entity_id) {
-                            entity.last = Some(st.clone());
-                        }
-                        self.entity_windows.insert(entity_id.clone(), id);
+                    if let Some(st) = self.ha.entities.get(&entity.entity_id) {
+                        entity.last = Some(st.clone());
                     }
-                    self.windows.insert(id, WindowState { kind, entity });
-                } else {
-                    self.set_status(
-                        "Received WindowActuallyOpened but pending_opens is empty",
-                        LogType::Warn,
-                    );
+
+                    self.entity_windows.insert(entity_id.clone(), id);
                 }
+
+                self.windows.insert(id, WindowState { kind, entity });
+
                 Task::none()
             }
 
@@ -597,11 +662,11 @@ impl Snapdash {
 
             Message::SavePressed => {
                 self.set_status("Saving...", LogType::DoNotLog);
-                if !self.ha_token_draft.trim().is_empty() {
-                    match crate::secrets::set_ha_token(self.ha_token_draft.trim()) {
+                if !self.ha.token_draft.trim().is_empty() {
+                    match token::set(self.ha.token_draft.trim()) {
                         Ok(()) => {
                             self.config.ha_token_present = true;
-                            self.ha_token_draft.clear();
+                            self.ha.token_draft.clear();
                             self.set_status("Token saved into keychain.", LogType::Info);
                         }
                         Err(e) => {
@@ -610,8 +675,7 @@ impl Snapdash {
                         }
                     }
                 }
-                let cfg = self.config.clone();
-                Task::perform(async move { cfg.save_async().await }, |_| Message::Saved)
+                self.save_config().chain(Task::done(Message::Saved))
             }
 
             Message::Saved => {
@@ -622,29 +686,24 @@ impl Snapdash {
             Message::OpenSettings => {
                 // if Settings window is opened, give focus
                 //
-                if let Some(settings_id) =
-                    Snapdash::find_window_id(&self.windows, WindowKind::Settings, None)
+                if let Some(settings_id) = find_window_id(&self.windows, WindowKind::Settings, None)
                 {
                     return iced::window::gain_focus::<Message>(settings_id);
                 }
-
-                self.pending_opens.push_back(WindowKind::Settings);
 
                 // The platform helper adds a transparent shadow margin on
                 // Linux (where we render our own shader shadow) and is a
                 // no-op on macOS/Windows (where the OS clips + draws its
                 // own shadow). See `ui::platform` module doc.
-                let settings = window_settings(iced::Size::new(820.0, 950.0), false);
-                let (_id, task_id) = window::open(settings);
-                task_id.map(Message::WindowActuallyOpened)
+                let settings = window_settings(iced::Size::new(920.0, 640.0), true);
+                let (id, task_id) = window::open(settings);
+                task_id.map(move |_| Message::WindowOpened {
+                    id,
+                    kind: WindowKind::Settings,
+                })
             }
 
             Message::OpenEntity(entity_id) => {
-                // vytvoř nové okno pro entitu
-                // let (id, cmd) = window::open(...);
-                // self.entity_windows.insert(id, EntityWindowState { ... });
-                //
-
                 let widgets: Vec<String> = if entity_id.is_empty() {
                     self.config.widgets.clone()
                 } else {
@@ -653,7 +712,6 @@ impl Snapdash {
 
                 // Platform helper: adds shadow margin on Linux, pass-through
                 // on macOS/Windows. See `ui::platform` module doc.
-                let win_settings = window_settings(iced::Size::new(240.0, 160.0), false);
                 let mut task = Vec::new();
 
                 for widget in widgets {
@@ -661,11 +719,20 @@ impl Snapdash {
                         continue;
                     }
 
-                    self.pending_opens
-                        .push_back(WindowKind::Entity { entity_id: widget });
+                    let mut win_settings =
+                        window_settings(self.config.widget_size.window_size(), false);
+                    if let Some(saved) = self.config.widget_positions.get(&widget) {
+                        win_settings.position =
+                            window::Position::Specific(iced::Point::new(saved.x, saved.y));
+                    }
 
-                    let (_id, task_id) = window::open(win_settings.clone());
-                    task.push(task_id.map(Message::WindowActuallyOpened));
+                    let (id, task_id) = window::open(win_settings);
+                    task.push(task_id.map(move |_| Message::WindowOpened {
+                        id,
+                        kind: WindowKind::Entity {
+                            entity_id: widget.clone(),
+                        },
+                    }));
                 }
 
                 if task.is_empty() {
@@ -678,51 +745,48 @@ impl Snapdash {
             Message::ThemeSelected(t) => {
                 self.theme = t;
                 self.config.theme = t;
-                let cfg = self.config.clone();
-                let save = Task::perform(async move { cfg.save_async().await }, |_| {
-                    Message::SaveConfig
-                });
 
-                Task::batch([save])
+                self.save_config()
             }
 
-            Message::SaveConfig => Task::none(),
+            Message::SaveConfig => {
+                self.config_save_in_flight = false;
+                if self.config_save_pending {
+                    self.config_save_pending = false;
+                    return self.save_config();
+                }
+                Task::none()
+            }
 
             Message::ConnectHa => {
                 if !self.config.ha_enabled() {
-                    self.ha_connected = false;
-                    self.ha_connection = None;
+                    self.ha.connected = false;
+                    self.ha.connection = None;
                     self.set_status("HA not enabled (missing token/URL)", LogType::Error);
                     return Task::none();
                 }
 
-                let token = match crate::secrets::get_ha_token() {
+                let stored_token = match token::get() {
                     Ok(t) => t,
                     Err(e) => {
-                        self.ha_connected = false;
-                        self.ha_connection = None;
+                        self.ha.connected = false;
+                        self.ha.connection = None;
                         self.set_status(format!("Missing token in keychain {e}"), LogType::Error);
                         self.config.ha_token_present = false;
 
-                        let cfg = self.config.clone();
-                        return Task::perform(
-                            async move {
-                                let _ = cfg.save_async().await;
-                            },
-                            |_| Message::Noop,
-                        );
+                        return self.save_config().chain(Task::done(Message::Noop));
                     }
                 };
 
                 let next_connection = HaConnectionConfig {
                     url: self.config.ha_url.clone(),
-                    token,
+                    token: stored_token,
                 };
 
-                if self.ha_connection.as_ref() != Some(&next_connection) {
-                    self.ha_connected = false;
+                if self.ha.connection.as_ref() != Some(&next_connection) {
+                    self.ha.connected = false;
                     self.set_status("Connecting to HA ...", LogType::Info);
-                    self.ha_connection = Some(next_connection);
+                    self.ha.connection = Some(next_connection);
                 }
 
                 Task::none()
@@ -759,35 +823,74 @@ impl Snapdash {
             }
 
             Message::LastVersionChecked(release) => {
-                if let Some(release) = release {
-                    self.update_state = UpdateState::UpdateAvailable;
-                    self.release_notes_items =
-                        iced::widget::markdown::parse(&release.body).collect();
-                    self.latest_release = Some(release);
-                } else {
-                    self.update_state = UpdateState::UptoDate;
-                    self.latest_release = None;
-                    self.release_notes_items.clear();
-                }
+                self.update.record_check(release);
                 Task::none()
             }
             Message::OpenReleaseNotes => {
-                if let Some(opened) =
-                    Snapdash::find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
+                if let Some(opened) = find_window_id(&self.windows, WindowKind::ReleaseNotes, None)
                 {
                     return iced::window::gain_focus::<Message>(opened);
                 }
 
-                self.pending_opens.push_back(WindowKind::ReleaseNotes);
                 let settings = window_settings(iced::Size::new(560.0, 640.0), false);
-                let (_id, task_id) = window::open(settings);
-                task_id.map(Message::WindowActuallyOpened)
+                let (id, task_id) = window::open(settings);
+                task_id.map(move |_| Message::WindowOpened {
+                    id,
+                    kind: WindowKind::ReleaseNotes,
+                })
             }
             Message::OpenUrl(url) => {
                 if let Err(e) = open::that(&url) {
                     tracing::warn!(url, error = %e, "failed to open URL");
                 }
                 Task::none()
+            }
+
+            Message::WidgetMoved { id, position } => {
+                let Some(window) = self.windows.get(&id) else {
+                    return Task::none();
+                };
+                let WindowKind::Entity { entity_id } = &window.kind else {
+                    return Task::none();
+                };
+
+                let entity_id = entity_id.clone();
+                let new_position = WidgetPosition {
+                    x: position.x,
+                    y: position.y,
+                };
+
+                // Filter: if position is not moved - do nothing. Without filter we will fire
+                // debounce timer with every programatic move (ex. window manager snap-to-grid on borders).
+
+                if self.config.widget_positions.get(&entity_id) == Some(&new_position) {
+                    return Task::none();
+                }
+
+                self.config.widget_positions.insert(entity_id, new_position);
+                self.last_widget_move_at = Some(std::time::Instant::now());
+
+                Task::perform(
+                    async {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    },
+                    |_| Message::PersistWidgetPositions,
+                )
+            }
+
+            Message::PersistWidgetPositions => {
+                let Some(last) = self.last_widget_move_at else {
+                    return Task::none();
+                };
+
+                // Trailing-edge debounce: if last move < 500ms, widget has moved once more
+                // delay write
+
+                if last.elapsed() < Duration::from_millis(500) {
+                    return Task::none();
+                }
+                self.last_widget_move_at = None;
+                self.save_config()
             }
         }
     }

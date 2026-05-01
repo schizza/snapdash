@@ -4,11 +4,14 @@ use iced::{Alignment, Element, Length, window};
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
 use crate::ui::components;
+use crate::ui::icon::Icon;
+use crate::ui::theme::UiTheme;
 
 pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
+    let ui_theme = UiTheme::from(&snap.theme);
     let p = snap.theme.palette();
 
-    let title_text = match &snap.latest_release {
+    let title_text = match &snap.update.latest_release {
         Some(r) => format!("Update to {}", r.tag_name),
         None => "Release notes".to_owned(),
     };
@@ -20,12 +23,16 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     let title_bar: Element<Message> = row![
         mouse_area(container(title_widget).width(Length::Fill).padding([4, 0]))
             .on_press(Message::StartDrag(id)),
-        components::icon("✕", p, Some(Message::CloseWindow(id))),
+        components::pill_button(
+            Icon::Close.text(ui_theme),
+            p,
+            Some(Message::CloseWindow(id))
+        ),
     ]
     .align_y(Alignment::Center)
     .into();
 
-    let Some(release) = &snap.latest_release else {
+    let Some(release) = &snap.update.latest_release else {
         let body: Element<Message> = container(components::dimmed("No update available", p))
             .center(Length::Fill)
             .height(Length::Fill)
@@ -64,7 +71,7 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     };
 
     let md_inner: Element<Message> = markdown::view(
-        &snap.release_notes_items,
+        &snap.update.release_notes_items,
         markdown::Settings::with_text_size(13, md_style),
     )
     .map(Message::OpenUrl);
