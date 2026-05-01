@@ -403,8 +403,18 @@ impl Snapdash {
             Message::OpenLogFile => {
                 match crate::logger::log_path() {
                     Ok(path) => {
-                        if let Err(e) = open::that(&path) {
-                            tracing::warn!(path = %path.display(), error = %e, "failed to open log file")
+                        #[cfg(target_os = "windows")]
+                        {
+                            let target = path.parent().map(|p| p.to_path_buf()).unwrap_or(path);
+                            if let Err(e) = open::that(&target) {
+                                tracing::warn!(path = %target.display(), error = %e, "failed to open log dir");
+                            }
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            if let Err(e) = open::that(&path) {
+                                tracing::warn!(path = %path.display(), error = %e, "failed to open log file")
+                            }
                         }
                     }
                     Err(e) => tracing::warn!(error = %e, "no log path available"),
