@@ -22,7 +22,7 @@ fn target_pattern() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("macos-aarch64"),
         ("linux", "x86_64") => Some("linux-x86-64"),
-        ("windows", "x86_64") => Some("winows-x86_64"),
+        ("windows", "x86_64") => Some("windows-x86_64"),
         _ => None,
     }
 }
@@ -138,7 +138,7 @@ pub fn verify_checksum(archive: &Path, checksum_file: &Path) -> Result<()> {
 fn find_file_recursive(dir: &Path, name: &str) -> Option<PathBuf> {
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let path: PathBuf = entry.path();
-        if path.is_file() && path.file_name().and_then(|n: &OsStr| n.to_str()) == Some(name) {
+        if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some(name) {
             return Some(path);
         }
         if path.is_dir()
@@ -156,8 +156,13 @@ pub fn install_archive(archive: &Path) -> Result<PathBuf> {
     use flate2::read::GzDecoder;
     use tar::Archive;
 
-    let bundle_path =
-        detect_app_bundle().ok_or_else(|| anyhow!("not running from a .app bundle"))?;
+    let bundle_path = detect_app_bundle().ok_or_else(|| {
+        anyhow!(
+            "Auto-update is only available in packaged .app builds. \
+                 Download the latest release from \
+                 https://github.com/{REPO_OWNER}/{REPO_NAME}/releases"
+        )
+    })?;
 
     let parent = bundle_path
         .parent()

@@ -3,7 +3,7 @@ use iced::{Element, Length};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
-use crate::ui::components::{self, ButtonVisual};
+use crate::ui::components::{self, error_message, success_message};
 use crate::ui::theme::UiTheme;
 use crate::ui::update_view;
 use crate::update::{self, InstallProgress, UpdateState};
@@ -48,32 +48,12 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         }
     };
 
-    // Error message line — zobrazí se JEN když je Failed
-    let install_error: Option<Element<Message>> = match &snap.update.install {
-        InstallProgress::Failed(err) => Some(
-            iced::widget::container(
-                iced::widget::text(format!("Update failed: {err}"))
-                    .size(12)
-                    .style(move |_: &iced::Theme| iced::widget::text::Style {
-                        color: Some(p.danger),
-                    }),
-            )
-            .padding([8, 12])
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(iced::Color {
-                    a: 0.12,
-                    ..p.danger
-                })),
-                border: iced::Border {
-                    radius: 6.0.into(),
-                    width: 1.0,
-                    color: iced::Color { a: 0.4, ..p.danger },
-                },
-                ..Default::default()
-            })
-            .width(iced::Length::Fill)
-            .into(),
-        ),
+    // Status line
+    let install_status: Option<Element<Message>> = match &snap.update.install {
+        InstallProgress::Failed(err) => Some(error_message(format!("Update failed: {err}"), p)),
+        InstallProgress::ReadyToRestart(..) => {
+            Some(success_message("Update succesfull. Restart to apply.", p))
+        }
         _ => None,
     };
 
@@ -109,8 +89,8 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     ]
     .spacing(metric::GAP);
 
-    if let Some(err_box) = install_error {
-        body = body.push(err_box);
+    if let Some(status_box) = install_status {
+        body = body.push(status_box);
         body = body.push(iced::widget::space().height(metric::GAP));
     }
 
