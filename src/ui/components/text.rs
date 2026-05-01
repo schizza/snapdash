@@ -89,6 +89,7 @@ pub fn helper<S: Into<String>>(label: S, p: Palette) -> text::Text<'static> {
     text(label.into()).color(p.text_dim).size(11)
 }
 
+/// Returns `column![...]` as Element<Message>
 pub fn body_with_helper<'a, S: Into<String>>(
     label: S,
     helper_text: S,
@@ -96,6 +97,7 @@ pub fn body_with_helper<'a, S: Into<String>>(
 ) -> Element<'a, Message> {
     column![body(label, p), helper(helper_text, p)]
         .width(Length::Fill)
+        .spacing(2)
         .into()
 }
 

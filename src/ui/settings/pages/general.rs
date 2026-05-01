@@ -68,6 +68,47 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let stats = components::subcard(column![ha_row, sensors_row].spacing(metric::GAP).into(), p);
 
+    let autostart_row: Element<Message> = row![
+        components::body_with_helper(
+            "Start at login",
+            "Launch Snapdash automatically when you log in your computer.",
+            p
+        ),
+        iced::widget::toggler(snap.config.autostart)
+            .on_toggle(Message::AutostartChanged)
+            .size(20)
+            .style(move |_theme, status| {
+                use iced::widget::toggler::{Status, Style};
+                let active = matches!(status, Status::Active { is_toggled: true })
+                    || matches!(status, Status::Hovered { is_toggled: true });
+                Style {
+                    background: if active {
+                        p.accent.into()
+                    } else {
+                        p.card_2.into()
+                    },
+                    background_border_width: 1.0,
+                    background_border_color: if active { p.accent } else { p.border },
+                    foreground: p.text_primary.into(),
+                    foreground_border_width: 0.0,
+                    foreground_border_color: iced::Color::TRANSPARENT,
+                    text_color: p.text_body.into(),
+                    border_radius: Some(999.0.into()),
+                    padding_ratio: 0.15,
+                }
+            }),
+    ]
+    .align_y(iced::Alignment::Center)
+    .spacing(metric::GAP)
+    .into();
+
+    let behavior = components::subcard(
+        column![components::section("Behavior", p), autostart_row,]
+            .spacing(metric::GAP)
+            .into(),
+        p,
+    );
+
     let actions = components::subcard(
         column![action_config, action_logs]
             .spacing(metric::GAP)
@@ -80,6 +121,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         hero,
         iced::widget::space().height(metric::PAD),
         stats,
+        behavior,
         actions,
     ]
     .spacing(metric::PAD)
