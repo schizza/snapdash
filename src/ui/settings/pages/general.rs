@@ -68,6 +68,43 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 
     let stats = components::subcard(column![ha_row, sensors_row].spacing(metric::GAP).into(), p);
 
+    let macos_hint: Option<Element<Message>> = if cfg!(target_os = "macos") && snap.config.autostart
+    {
+        Some(
+            components::helper(
+                "macOS may ask you to allow Snapdash in System Settings → \
+                         Login Items the first time. After approval, autostart \
+                         persists across reboots.",
+                p,
+            )
+            .into(),
+        )
+    } else {
+        None
+    };
+
+    let autostart_row: Element<Message> = row![
+        components::body_with_helper(
+            "Start at login",
+            "Launch Snapdash automatically when you log in your computer.",
+            p
+        ),
+        components::toggler(snap.config.autostart, Message::AutostartChanged, p),
+    ]
+    .align_y(iced::Alignment::Center)
+    .spacing(metric::GAP)
+    .into();
+
+    let mut behavior_inner =
+        iced::widget::column![components::section("Behavior", p), autostart_row]
+            .spacing(metric::GAP);
+
+    if let Some(hint) = macos_hint {
+        behavior_inner = behavior_inner.push(hint);
+    }
+
+    let behavior = components::subcard(behavior_inner.into(), p);
+
     let actions = components::subcard(
         column![action_config, action_logs]
             .spacing(metric::GAP)
@@ -80,6 +117,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         hero,
         iced::widget::space().height(metric::PAD),
         stats,
+        behavior,
         actions,
     ]
     .spacing(metric::PAD)

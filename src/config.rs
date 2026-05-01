@@ -15,6 +15,8 @@ pub struct Config {
     #[serde(default)]
     pub debug_overlay: bool,
     #[serde(default)]
+    pub autostart: bool,
+    #[serde(default)]
     pub widgets: Vec<String>,
     #[serde(default)]
     pub widget_positions: HashMap<String, WidgetPosition>,
@@ -34,6 +36,7 @@ impl Default for Config {
             ha_url: "http://localhost:8123".into(),
             theme: ThemeKind::default(),
             ha_token_present: false,
+            autostart: false,
             debug_overlay: false,
             widgets: Vec::new(),
             widget_positions: HashMap::new(),

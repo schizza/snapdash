@@ -125,6 +125,8 @@ pub enum Message {
     InstallUpdate,
     UpdateInstelled(Result<std::path::PathBuf, String>),
     RestartAfterUpdate(std::path::PathBuf),
+
+    AutostartChanged(bool),
 }
 
 impl Default for Snapdash {
@@ -375,6 +377,27 @@ impl Snapdash {
         match message {
             Message::Noop => Task::none(),
 
+            Message::AutostartChanged(want) => {
+                let previous = self.config.autostart;
+                self.config.autostart = want;
+
+                let result = if want {
+                    crate::autostart::enable()
+                } else {
+                    crate::autostart::disable()
+                };
+
+                if let Err(e) = result {
+                    self.config.autostart = previous;
+                    tracing::error!(error = %e, want, "autostart update failed");
+                    self.set_status(format!("Autostart change failed: {e}"), LogType::Error);
+                    return Task::none();
+                }
+
+                let action = if want { "enabled" } else { "disabled" };
+                self.set_status(format!("Autostart {action}"), LogType::Info);
+                self.save_config()
+            }
             Message::InstallUpdate => {
                 // Guard
                 if !matches!(
@@ -547,6 +570,7 @@ impl Snapdash {
                     Ok(cfg) => {
                         self.theme = cfg.theme;
                         self.config = cfg;
+                        crate::autostart::validate_state(self.config.autostart);
                         self.rebuild_selected_widgets();
                         self.set_status("Config loaded", LogType::Info);
 
