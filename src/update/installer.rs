@@ -108,8 +108,6 @@ pub fn download_to(url: &str, dest_dir: &Path, file_name: &str) -> Result<PathBu
 /// `.sha256` file format: hex digest, optionally followed by whitespace
 /// + filename. We accept any of: `<hex>`, `<hex>  filename`, `<hex>  *filename`.
 pub fn verify_checksum(archive: &Path, checksum_file: &Path) -> Result<()> {
-    use std::fmt::Write as _;
-
     let raw = std::fs::read_to_string(checksum_file).context("read .sha256")?;
     let expected = raw
         .split_whitespace()
@@ -129,4 +127,149 @@ pub fn verify_checksum(archive: &Path, checksum_file: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Recursively walks a directory looking for a file with the given
+/// `name`. Used to find the binary inside an extracted tarball/zip
+/// where the structure (subdirs, .app bundle internals) varies per
+/// platform. For Linux and Winows platforms
+#[cfg(not(target_os = "macos"))]
+fn find_file_recursive(dir: &Path, name: &str) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path: PathBuf = entry.path();
+        if path.is_file() && path.file_name().and_then(|n: &OsStr| n.to_str()) == Some(name) {
+            return Some(path);
+        }
+        if path.is_dir()
+            && let Some(found) = find_file_recursive(&path, name)
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
+//   macOS
+#[cfg(target_os = "macos")]
+pub fn install_archive(archive: &Path) -> Result<PathBuf> {
+    use flate2::read::GzDecoder;
+    use tar::Archive;
+
+    let bundle_path =
+        detect_app_bundle().ok_or_else(|| anyhow!("not running from a .app bundle"))?;
+
+    let parent = bundle_path
+        .parent()
+        .ok_or_else(|| anyhow!("bundle has no parent directory"))?;
+
+    // Staging dir next to bundle → atomic rename
+    let staging = tempfile::TempDir::new_in(parent).context("staging dir")?;
+
+    let file = std::fs::File::open(archive).context("open archive")?;
+    Archive::new(GzDecoder::new(file))
+        .unpack(staging.path())
+        .context("extract tar.gz")?;
+
+    let new_bundle = std::fs::read_dir(staging.path())?
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().and_then(|s| s.to_str()) == Some("app"))
+        .ok_or_else(|| anyhow!("no .app found in archive"))?
+        .path();
+
+    // Strip quarantine xattr
+    let xattr_status = std::process::Command::new("xattr")
+        .args(["-cr", new_bundle.to_str().unwrap()])
+        .status()
+        .context("run xattr -cr")?;
+    if !xattr_status.success() {
+        return Err(anyhow!("xattr -cr failed with status {xattr_status}"));
+    }
+
+    // Atomic swap
+    let backup = bundle_path.with_extension("app.old");
+    let _ = std::fs::remove_dir_all(&backup);
+    std::fs::rename(&bundle_path, &backup).context("rename old bundle")?;
+    std::fs::rename(&new_bundle, &bundle_path).context("rename new bundle")?;
+
+    Ok(bundle_path
+        .join("Contents/MacOS")
+        .join(env!("CARGO_PKG_NAME")))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn detect_app_bundle() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let mut path: &Path = exe.as_path();
+    while let Some(parent) = path.parent() {
+        if parent.extension().and_then(|s| s.to_str()) == Some("app") {
+            return Some(parent.to_path_buf());
+        }
+        path = parent;
+    }
+    None
+}
+
+//   Linux
+#[cfg(target_os = "linux")]
+pub fn install_archive(archive: &Path) -> Result<PathBuf> {
+    use flate2::read::GzDecoder;
+    use tar::Archive;
+
+    let current_exe = std::env::current_exe().context("current_exe")?;
+    let parent = current_exe
+        .parent()
+        .ok_or_else(|| anyhow!("exe has no parent"))?;
+
+    let staging = tempfile::TempDir::new_in(parent).context("staging dir")?;
+
+    let file = std::fs::File::open(archive).context("open archive")?;
+    Archive::new(GzDecoder::new(file))
+        .unpack(staging.path())
+        .context("extract tar.gz")?;
+
+    let bin_name = env!("CARGO_PKG_NAME");
+    let new_exe = find_file_recursive(staging.path(), bin_name)
+        .ok_or_else(|| anyhow!("'{bin_name}' not found in archive"))?;
+
+    // Linux mmap pattern: rename old, move new — both atomic. The running
+    // process keeps its mmap intact regardless.
+    let backup = current_exe.with_extension("old");
+    let _ = std::fs::remove_file(&backup);
+    std::fs::rename(&current_exe, &backup).context("backup current exe")?;
+    std::fs::rename(&new_exe, &current_exe).context("install new exe")?;
+
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(&current_exe)?.permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&current_exe, perms)?;
+
+    Ok(current_exe)
+}
+
+//    Windows
+
+#[cfg(target_os = "windows")]
+pub fn install_archive(archive: &Path) -> Result<PathBuf> {
+    let current_exe = std::env::current_exe().context("current_exe")?;
+    let parent = current_exe
+        .parent()
+        .ok_or_else(|| anyhow!("exe has no parent"))?;
+
+    let staging = tempfile::TempDir::new_in(parent).context("staging dir")?;
+
+    let file = std::fs::File::open(archive).context("open archive")?;
+    let mut zip = zip::ZipArchive::new(file).context("read zip")?;
+    zip.extract(staging.path()).context("extract zip")?;
+
+    let bin_name = format!("{}.exe", env!("CARGO_PKG_NAME"));
+    let new_exe = find_file_recursive(staging.path(), &bin_name)
+        .ok_or_else(|| anyhow!("'{bin_name}' not found in archive"))?;
+
+    // Windows can rename a locked .exe even though it can't overwrite it.
+    let backup = current_exe.with_extension("exe.old");
+    let _ = std::fs::remove_file(&backup);
+    std::fs::rename(&current_exe, &backup).context("backup current exe")?;
+    std::fs::rename(&new_exe, &current_exe).context("install new exe")?;
+
+    Ok(current_exe)
 }
