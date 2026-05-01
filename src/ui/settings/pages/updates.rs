@@ -3,10 +3,10 @@ use iced::{Element, Length};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
-use crate::ui::components;
+use crate::ui::components::{self, ButtonVisual};
 use crate::ui::theme::UiTheme;
 use crate::ui::update_view;
-use crate::update::{self, UpdateState};
+use crate::update::{self, InstallProgress, UpdateState};
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let p = snap.theme.palette();
@@ -30,7 +30,39 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     .spacing(metric::GAP)
     .align_y(iced::Alignment::Center);
 
-    let actions: Element<Message> = if snap.update.is_available() {
+    let install_block: Element<Message> = match &snap.update.install {
+        InstallProgress::Idle if snap.update.is_available() => {
+            components::primary_button("Install update", p, Some(Message::InstallUpdate)).into()
+        }
+        InstallProgress::Idle => iced::widget::space().width(0).height(0).into(),
+        InstallProgress::Installing => {
+            iced::widget::row![components::body("Installing update...", p),]
+                .align_y(iced::Alignment::Center)
+                .into()
+        }
+        InstallProgress::ReadyToRestart(exec) => {
+            let exec = exec.clone();
+            iced::widget::row![
+                components::body("Update installed.", p),
+                iced::widget::space().width(metric::GAP),
+                components::pill_button("Restart now", p, Some(Message::RestartAfterUpdate(exec)),),
+            ]
+            .align_y(iced::Alignment::Center)
+            .into()
+        }
+        InstallProgress::Failed(err) => iced::widget::column![
+            iced::widget::text(format!("Update failed: {err}"))
+                .size(13)
+                .style(move |_: &iced::Theme| iced::widget::text::Style {
+                    color: Some(p.danger),
+                }),
+            iced::widget::space().height(metric::GAP),
+            components::pill_button("Retry", p, Some(Message::InstallUpdate)),
+        ]
+        .into(),
+    };
+
+    let actions: Element<Message> = if !snap.update.is_available() {
         row![
             components::pill_button("Check for updates", p, Some(Message::CheckForUpdate),),
             components::pill_button(
@@ -42,9 +74,17 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         .spacing(metric::GAP)
         .into()
     } else {
-        components::pill_button("Check for updates", p, Some(Message::CheckForUpdate)).into()
+        row![
+            install_block,
+            components::pill_button(
+                "Show latest release notes",
+                p,
+                Some(Message::OpenReleaseNotes),
+            ),
+        ]
+        .spacing(metric::GAP)
+        .into()
     };
-
     let body = column![
         components::label(format!("Current version: {}", update::CURRENT_VERSION), p,),
         iced::widget::space().height(metric::GAP),
