@@ -130,6 +130,48 @@ pub fn verify_checksum(archive: &Path, checksum_file: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn cleanup_stale_artefacts() {
+    let result: Result<()> = (|| {
+        #[cfg(target_os = "macos")]
+        if let Some(bundle) = detect_app_bundle() {
+            let backup = bundle.with_extension("app.old");
+            if backup.exists() {
+                std::fs::remove_dir_all(&backup)
+                    .with_context(|| format!("remove {}", backup.display()))?;
+                tracing::info!(path = %backup.display(), "cleaned up old bundle");
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let exe = std::env::current_exe()?;
+            let backup = exe.with_extension("old");
+            if backup.exists() {
+                std::fs::remove_file(&backup)
+                    .with_context(|| format!("remove {}", backup.display()))?;
+                tracing::info!(path = %backup.display(), "cleaned up old binary");
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let exe = std::env::current_exe()?;
+            let backup = exe.with_extension("exe.old");
+            if backup.exists() {
+                std::fs::remove_file(&backup)
+                    .with_context(|| format!("remove {}", backup.display()))?;
+                tracing::info!(path = %backup.display(), "cleaned up old binary");
+            }
+        }
+
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "failed to clean stale update artefacts");
+    }
+}
+
 /// Recursively walks a directory looking for a file with the given
 /// `name`. Used to find the binary inside an extracted tarball/zip
 /// where the structure (subdirs, .app bundle internals) varies per

@@ -17,6 +17,8 @@ impl Snapdash {
     /// load the on-disk config and fire the first GitHub release check in
     /// parallel.
     pub fn boot() -> (Self, Task<Message>) {
+        crate::update::installer::cleanup_stale_artefacts();
+
         let state = Self::new();
 
         let load_task = Task::perform(
