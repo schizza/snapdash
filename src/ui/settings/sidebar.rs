@@ -3,7 +3,7 @@ use iced::widget::{Button, button, column, text};
 use iced::{Background, Border, Color, Element, Length};
 
 use crate::app::{Message, Snapdash};
-use crate::theme::{Palette, metric};
+use crate::theme::{Palette, metric, text_size};
 
 use super::SettingsPage;
 
@@ -30,7 +30,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
 }
 
 fn nav_item(page: SettingsPage, is_active: bool, p: Palette) -> Button<'static, Message> {
-    button(text(page.label()).size(13))
+    button(text(page.label()).size(text_size::NORMAL))
         .style(move |_theme, status| {
             let bg = if is_active {
                 p.accent_tint

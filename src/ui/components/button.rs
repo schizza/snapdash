@@ -1,6 +1,10 @@
+use iced::widget::text::IntoFragment;
 use iced::{Background, Element, Length, widget::container};
 
-use crate::{app::Message, theme::Palette};
+use crate::{
+    app::Message,
+    theme::{Palette, text_size},
+};
 
 #[derive(Clone, Copy)]
 pub struct ButtonVisual {
@@ -14,6 +18,12 @@ pub struct ButtonVisual {
     pub text: iced::Color,
     pub text_disabled: iced::Color,
     pub radius: f32,
+}
+
+pub enum ButtonType {
+    PILL,
+    PRIMARY,
+    DANGER,
 }
 
 impl ButtonVisual {
@@ -35,13 +45,37 @@ impl ButtonVisual {
     pub fn primary(p: Palette) -> Self {
         Self {
             bg: p.accent_tint,
-            bg_hovered: p.accent,
-            bg_pressed: p.accent,
+            bg_hovered: p.accent_tint,
+            bg_pressed: p.accent_tint,
             bg_disabled: p.accent_tint,
-            border: iced::Color::TRANSPARENT,
-            border_hovered: iced::Color::TRANSPARENT,
+            border: p.accent_tint,
+            border_hovered: p.accent_dim,
             border_width: 1.0,
             text: p.text_primary,
+            text_disabled: p.text_disabled,
+            radius: 999.0,
+        }
+    }
+
+    pub fn danger(p: Palette) -> Self {
+        Self {
+            bg: iced::Color {
+                a: 0.16,
+                ..p.danger
+            },
+            bg_hovered: iced::Color {
+                a: 0.24,
+                ..p.danger
+            },
+            bg_pressed: iced::Color {
+                a: 0.32,
+                ..p.danger
+            },
+            bg_disabled: p.card_2,
+            border: p.danger,
+            border_hovered: p.danger,
+            border_width: 1.0,
+            text: p.danger,
             text_disabled: p.text_disabled,
             radius: 999.0,
         }
@@ -77,6 +111,19 @@ impl ButtonVisual {
     }
 }
 
+fn button_content<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(content)
+        .width(Length::Shrink)
+        .height(Length::Fill)
+        .center_x(Length::Shrink)
+        .center_y(Length::Fill)
+        .into()
+}
+
+fn text_content<'a>(label: impl IntoFragment<'a>) -> Element<'a, Message> {
+    iced::widget::text(label).size(text_size::NORMAL).into()
+}
+
 fn styled_button<'a>(
     content: impl Into<Element<'a, Message>>,
     visual: ButtonVisual,
@@ -108,24 +155,19 @@ fn styled_button<'a>(
                 } else {
                     visual.text
                 },
+
                 ..Default::default()
             }
         })
 }
 
 pub fn primary_button<'a>(
-    label: impl Into<Element<'a, Message>>,
+    label: impl IntoFragment<'a>,
     p: Palette,
     on_press: Option<Message>,
 ) -> iced::widget::Button<'a, Message> {
-    let content = container(label)
-        .width(Length::Shrink)
-        .height(Length::Fill)
-        .center_x(Length::Shrink)
-        .center_y(Length::Fill);
-
     let mut b = styled_button(
-        content,
+        button_content(text_content(label)),
         ButtonVisual::primary(p),
         [0, 12],
         Length::Fixed(36.0),
@@ -139,17 +181,16 @@ pub fn primary_button<'a>(
 }
 
 pub fn pill_button<'a>(
-    label: impl Into<Element<'a, Message>>,
+    label: impl IntoFragment<'a>,
     p: Palette,
     on_press: Option<Message>,
 ) -> iced::widget::Button<'a, Message> {
-    let content = container(label)
-        .width(Length::Shrink)
-        .height(Length::Fill)
-        .center_x(Length::Shrink)
-        .center_y(Length::Fill);
-
-    let mut b = styled_button(content, ButtonVisual::pill(p), [0, 12], Length::Fixed(36.0));
+    let mut b = styled_button(
+        button_content(text_content(label)),
+        ButtonVisual::pill(p),
+        [0, 12],
+        Length::Fixed(36.0),
+    );
 
     if let Some(msg) = on_press {
         b = b.on_press(msg);
@@ -162,13 +203,7 @@ pub fn pill_button_with<'a>(
     visual: ButtonVisual,
     on_press: Option<Message>,
 ) -> iced::widget::Button<'a, Message> {
-    let content = container(label)
-        .width(Length::Shrink)
-        .height(Length::Fill)
-        .center_x(Length::Shrink)
-        .center_y(Length::Fill);
-
-    let mut b = styled_button(content, visual, [0, 12], Length::Fixed(36.0));
+    let mut b = styled_button(button_content(label), visual, [0, 12], Length::Fixed(36.0));
 
     if let Some(msg) = on_press {
         b = b.on_press(msg);
@@ -176,52 +211,38 @@ pub fn pill_button_with<'a>(
     b
 }
 
-// pub fn icon(
-//     content: impl Into<Element<'static, Message>>,
-//     p: Palette,
-//     on_press: Option<Message>,
-// ) -> iced::widget::Button<'static, Message> {
-//     use iced::widget::button::Status;
+pub fn danger_button_with<'a>(
+    content: Element<'a, Message>,
+    p: Palette,
+    on_press: Option<Message>,
+) -> iced::widget::Button<'a, Message> {
+    let mut b = styled_button(
+        button_content(content),
+        ButtonVisual::danger(p),
+        [0, 12],
+        Length::Fixed(36.0),
+    );
 
-//     let mut b = button(content)
-//         .padding([0, 12])
-//         .height(36)
-//         .style(move |_theme, status| {
-//             let mut bg = p.card_2;
-//             let mut border = p.border;
+    if let Some(m) = on_press {
+        b = b.on_press(m);
+    };
+    b
+}
 
-//             match status {
-//                 Status::Hovered => {
-//                     bg = p.card;
-//                     border = p.border_hovered
-//                 }
-//                 Status::Pressed => bg = p.accent_tint,
-//                 Status::Disabled => {
-//                     bg = p.card_2;
-//                     border = p.border
-//                 }
-//                 Status::Active => {}
-//             }
+pub fn danger_button<'a>(
+    label: impl IntoFragment<'a>,
+    p: Palette,
+    on_press: Option<Message>,
+) -> iced::widget::Button<'a, Message> {
+    let mut b = styled_button(
+        button_content(text_content(label)),
+        ButtonVisual::danger(p),
+        [0, 12],
+        Length::Fixed(36.0),
+    );
 
-//             button::Style {
-//                 background: Some(Background::Color(bg)),
-//                 border: Border {
-//                     radius: 999.0.into(),
-//                     width: 1.0,
-//                     color: border,
-//                 },
-//                 text_color: if matches!(status, Status::Disabled) {
-//                     p.text_disabled
-//                 } else {
-//                     p.text_body
-//                 },
-//                 ..Default::default()
-//             }
-//         });
-
-//     if let Some(msg) = on_press {
-//         b = b.on_press(msg);
-//     }
-
-//     b
-// }
+    if let Some(msg) = on_press {
+        b = b.on_press(msg);
+    }
+    b
+}

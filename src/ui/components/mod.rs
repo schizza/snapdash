@@ -3,9 +3,13 @@ mod card;
 mod input;
 mod scrollable;
 mod sensors;
+pub mod settings_components;
 mod text;
 
-pub use button::{ButtonVisual, pill_button, pill_button_with, primary_button};
+pub use button::{
+    ButtonType, ButtonVisual, danger_button, danger_button_with, pill_button, pill_button_with,
+    primary_button,
+};
 pub use card::{card, card_with_border, fieldset, subcard};
 pub use input::{mac_input, picker, themepicker, toggler};
 pub use scrollable::scrollable;
