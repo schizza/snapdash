@@ -3,7 +3,7 @@ use iced::widget::{pick_list, text_input};
 use iced::{Background, Border};
 
 use crate::app::Message;
-use crate::theme::{Palette, ThemeKind, metric};
+use crate::theme::{Palette, ThemeKind, metric, text_size};
 
 /// text_input wrapper to sytle as mac input
 pub fn mac_input<'a>(
@@ -14,6 +14,7 @@ pub fn mac_input<'a>(
     use iced::widget::text_input::Status;
 
     text_input(placeholder, value)
+        .size(text_size::NORMAL)
         .padding(10)
         .style(move |_theme, status| {
             let mut border_color = p.border;
@@ -56,7 +57,8 @@ where
     use iced::widget::pick_list::Status;
 
     pick_list(options, Some(selected), on_select)
-        .padding([0, 12])
+        .text_size(text_size::NORMAL)
+        .padding([3, 12])
         .style(move |_theme, status| {
             let bg = p.card_2;
             let mut border = p.border;

@@ -2,13 +2,11 @@ use iced::widget::{column, container, markdown, mouse_area, row, text};
 use iced::{Alignment, Element, Length, window};
 
 use crate::app::{Message, Snapdash};
-use crate::theme::metric;
+use crate::theme::{metric, text_size};
 use crate::ui::components;
 use crate::ui::icon::Icon;
-use crate::ui::theme::UiTheme;
 
 pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
-    let ui_theme = UiTheme::from(&snap.theme);
     let p = snap.theme.palette();
 
     let title_text = match &snap.update.latest_release {
@@ -23,9 +21,9 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     let title_bar: Element<Message> = row![
         mouse_area(container(title_widget).width(Length::Fill).padding([4, 0]))
             .on_press(Message::StartDrag(id)),
-        components::pill_button(
-            Icon::Close.text(ui_theme),
-            p,
+        components::pill_button_with(
+            Icon::Close.text(p),
+            components::ButtonVisual::pill(p),
             Some(Message::CloseWindow(id))
         ),
     ]
@@ -72,7 +70,7 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
 
     let md_inner: Element<Message> = markdown::view(
         &snap.update.release_notes_items,
-        markdown::Settings::with_text_size(13, md_style),
+        markdown::Settings::with_text_size(text_size::NORMAL, md_style),
     )
     .map(Message::OpenUrl);
 

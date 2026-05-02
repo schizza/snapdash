@@ -1,47 +1,48 @@
-use iced::widget::{column, row};
-use iced::{Element, Length};
+use iced::Element;
 
 use crate::app::{Message, Snapdash};
-use crate::theme::metric;
-use crate::ui::components;
+use crate::theme::text_size;
+use crate::ui::components::{self, settings_components};
 use crate::ui::icon::Icon;
-use crate::ui::theme::UiTheme;
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let p = snap.theme.palette();
-    let ui_theme = UiTheme::from(&snap.theme);
 
-    let url: Element<Message> = components::mac_input("Home Assistant URL", &snap.config.ha_url, p)
-        .on_input(Message::HaUrlChanged)
+    let token_item = if !snap.config.ha_token_present {
+        settings_components::item_with_input(
+            "Token",
+            Some("Enter your Home Assistant`s Long-lived token"),
+            "Long-Lived Token belong here ...",
+            &snap.ha.token_draft,
+            Message::HaTokenDraftChanged,
+            Some(Message::SavePressed),
+            p,
+        )
+    } else {
+        let title_element = components::success_message("Token is stored in the key-chain", p);
+        let action_element = components::danger_button_with(
+            Icon::Trash.text(p).size(text_size::LARGE).into(),
+            p,
+            Some(Message::HaTokenDelete),
+        )
         .into();
-
-    let placeholder = match snap.config.ha_token_present {
-        true => "Token stored in key-chain",
-        _ => "Enter your token ...",
+        settings_components::item_with_element(title_element, action_element)
     };
 
-    let token: Element<Message> = components::mac_input(placeholder, &snap.ha.token_draft, p)
-        .on_input(Message::HaTokenDraftChanged)
-        .into();
-
-    let token_delete: Element<Message> =
-        components::pill_button(Icon::Trash.text(ui_theme), p, Some(Message::HaTokenDelete)).into();
-
-    let body = components::subcard(
-        column![
-            components::section("Home Assistant", p),
-            url,
-            row![token, token_delete]
-                .spacing(metric::GAP)
-                .align_y(iced::Alignment::Center)
-        ]
-        .spacing(metric::GAP)
-        .into(),
+    settings_components::page(
+        "Connection",
+        [
+            settings_components::item_with_input(
+                "Home Assistant URL",
+                Some("Enter fully qualified URL or IP (with http or https prefix)."),
+                "Enter your Home Assistant's URL or IP address ...",
+                &snap.config.ha_url,
+                Message::HaUrlChanged,
+                Some(Message::SavePressed),
+                p,
+            ),
+            token_item,
+        ],
         p,
-    );
-
-    column![components::title(snap.settings_page.label(), p), body]
-        .width(Length::Fill)
-        .spacing(metric::GAP)
-        .into()
+    )
 }

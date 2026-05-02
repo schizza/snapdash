@@ -4,13 +4,11 @@ use iced::{Element, Length};
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
 use crate::ui::components::{self, error_message, success_message};
-use crate::ui::theme::UiTheme;
 use crate::ui::update_view;
 use crate::update::{self, InstallProgress, UpdateState};
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let p = snap.theme.palette();
-    let ui_theme = UiTheme::from(&snap.theme);
 
     let latest = match &snap.update.latest_release {
         Some(release) => release.tag_name.to_string(),
@@ -24,7 +22,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     };
 
     let status_row = row![
-        update_view::status_icon(snap.update.state, ui_theme, p),
+        update_view::status_icon(snap.update.state, p),
         components::label(status_text, p),
     ]
     .spacing(metric::GAP)
