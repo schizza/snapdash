@@ -110,8 +110,10 @@ pub fn view(
     };
 
     let main = main_opt.unwrap_or_else(|| "-".into());
+    let value_size = size.value_font_for(main.chars().count());
     let value_text = text(main)
-        .size(size.value_font())
+        .size(value_size)
+        .wrapping(iced::widget::text::Wrapping::None)
         .style(move |_: &iced::Theme| iced::widget::text::Style {
             color: Some(p.text_primary),
         });

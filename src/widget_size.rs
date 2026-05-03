@@ -44,6 +44,20 @@ impl WidgetSize {
             Self::Large => 44.0,
         }
     }
+    /// Returns the font size value to use for the
+    /// given text lenght
+    /// Shrink gracefully so long values stays on one
+    /// line and don`t push the widget layout aroud.
+    pub fn value_font_for(self, text_len: usize) -> f32 {
+        let base = self.value_font();
+        let factor = match text_len {
+            0..=5 => 1.0,
+            6..=9 => 0.85,
+            10..=12 => 0.7,
+            _ => 0.55,
+        };
+        base * factor
+    }
 
     pub fn title_font(self) -> f32 {
         match self {
