@@ -1,4 +1,3 @@
-use crate::ha;
 use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
@@ -6,6 +5,7 @@ use crate::ui::platform::window_settings;
 use crate::ui::settings::*;
 use crate::update;
 use crate::widget_size::WidgetSize;
+use crate::{ha, logger};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -119,6 +119,7 @@ pub enum Message {
 
     OpenConfigFile,
     OpenLogFile,
+    TruncateLogFile,
     ResetConfig,
 
     WidgetSizeChanged(WidgetSize),
@@ -580,6 +581,17 @@ impl Snapdash {
                 self.set_status("Configuration rest to defaults", LogType::Info);
                 self.save_config()
             }
+
+            Message::TruncateLogFile => match logger::clear_log() {
+                Ok(_) => {
+                    self.set_status("Log has been truncated.", LogType::DoNotLog);
+                    Task::none()
+                }
+                Err(e) => {
+                    self.set_status(format!("Can not clear log. {e}"), LogType::Warn);
+                    Task::none()
+                }
+            },
 
             Message::SettingsPageSelected(page) => {
                 self.settings_page = page;

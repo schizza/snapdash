@@ -28,11 +28,29 @@ where
         .into()
 }
 
+pub fn page_with_sections<'a, I>(
+    title: impl IntoFragment<'a>,
+    items: I,
+    p: Palette,
+) -> Element<'a, Message>
+where
+    I: IntoIterator<Item = Element<'a, Message>>,
+{
+    let outer = column![components::title(title, p)]
+        .spacing(metric::GAP)
+        .width(Length::Fill);
+
+    items
+        .into_iter()
+        .fold(outer, |col, item| col.push(item))
+        .into()
+}
+
 /// One row i a settings card: left side a label and optional
 /// helper text, right side carry action widget.
 fn item<'a>(
     label: impl IntoFragment<'a>,
-    helper: Option<&'a str>,
+    helper: Option<impl IntoFragment<'a>>,
     action: Element<'a, Message>,
     p: Palette,
 ) -> Element<'a, Message> {
@@ -133,7 +151,7 @@ pub fn item_with_input<'a>(
 
 pub fn item_with_icon_button<'a>(
     label: impl IntoFragment<'a>,
-    helper: Option<&'a str>,
+    helper: Option<impl IntoFragment<'a>>,
     icon: crate::ui::icon::Icon,
     on_click: Message,
     p: Palette,
