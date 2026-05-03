@@ -852,19 +852,35 @@ impl Snapdash {
             }
 
             Message::ConnectHa => {
-                if self.config.ha_url.trim().is_empty()
-                    || matches!(self.token_presence, TokenPresence::Missing)
-                {
+                if self.config.ha_url.trim().is_empty() {
                     self.ha.connected = false;
                     self.ha.connection = None;
-                    if matches!(self.token_presence, TokenPresence::Missing) {
-                        self.set_status("HA not enabled - missing token", LogType::Error);
-                    } else {
-                        self.set_status("HA not enabled - URL", LogType::Error);
-                    }
+                    self.set_status("HA not enabled - URL", LogType::Error);
                     return Task::none();
                 }
 
+                match &self.token_presence {
+                    TokenPresence::Present => {}
+                    TokenPresence::Missing => {
+                        self.ha.connected = false;
+                        self.ha.connection = None;
+                        self.set_status("HA not enabled - missing token", LogType::Error);
+                        return Task::none();
+                    }
+                    TokenPresence::AccessFailed(e) => {
+                        self.ha.connected = false;
+                        self.ha.connection = None;
+                        self.set_status(format!("Keychain access needed: {e}"), LogType::Warn);
+                        return Task::none();
+                    }
+                    TokenPresence::Checking => {
+                        self.set_status("Checking token in keychain...", LogType::DoNotLog);
+                        return Task::none();
+                    }
+                    TokenPresence::Unchecked => {
+                        return Task::done(Message::CheckHaTokenPresence);
+                    }
+                }
                 let stored_token = match token::get_raw() {
                     Ok(t) => t,
                     Err(e) => {
