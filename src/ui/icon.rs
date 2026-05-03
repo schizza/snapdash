@@ -16,6 +16,7 @@ pub enum Icon {
     Trash,
     Close,
     Unknown,
+    Refresh,
 }
 
 impl Icon {
@@ -30,6 +31,7 @@ impl Icon {
             Self::Trash => '\u{e18e}',
             Self::Close => '\u{e1b2}',
             Self::Unknown => '\u{e47b}',
+            Self::Refresh => '\u{e144}',
         }
     }
 

@@ -20,5 +20,7 @@ pub struct HaState {
     pub connection: Option<HaConnectionConfig>,
     /// Token entered in Settings but not yet persisted to the keychain.
     pub token_draft: String,
+    /// Sets from ws.rs if coonection is refused by HA
+    pub auth_failed: bool,
     pub entities: HashMap<String, EntityState>,
 }
