@@ -20,8 +20,7 @@ pub fn window_content<'a>(
             app.theme.palette(),
             app.ha.connected,
             app.update.is_available(),
-            app.config.widget_size,
-            app.config.adaptive,
+            app.config.widget_settings,
         ),
         WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
     }

@@ -17,19 +17,25 @@ pub struct Config {
     #[serde(default)]
     pub autostart: bool,
     #[serde(default)]
+    pub widget_settings: WidgetSettings,
+    #[serde(default)]
     pub widgets: Vec<String>,
     #[serde(default)]
     pub widget_positions: HashMap<String, WidgetPosition>,
-    #[serde(default)]
-    pub widget_size: crate::widget_size::WidgetSize,
-    #[serde(default)]
-    pub adaptive: crate::widget_size::Adaptive,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq)]
 pub struct WidgetPosition {
     pub x: f32,
     pub y: f32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct WidgetSettings {
+    #[serde(default)]
+    pub widget_size: crate::widget_size::WidgetSize,
+    #[serde(default)]
+    pub adaptive: crate::widget_size::Adaptive,
 }
 
 impl Default for Config {
@@ -42,8 +48,10 @@ impl Default for Config {
             debug_overlay: false,
             widgets: Vec::new(),
             widget_positions: HashMap::new(),
-            widget_size: crate::widget_size::WidgetSize::default(),
-            adaptive: crate::widget_size::Adaptive::default(),
+            widget_settings: WidgetSettings {
+                widget_size: crate::widget_size::WidgetSize::default(),
+                adaptive: crate::widget_size::Adaptive::default(),
+            },
         }
     }
 }

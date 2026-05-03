@@ -521,7 +521,7 @@ impl Snapdash {
             },
 
             Message::WidgetSizeChanged(size) => {
-                self.config.widget_size = size;
+                self.config.widget_settings.widget_size = size;
 
                 // Route the card size through the platform helper so Linux gets its
                 // SHADOW_MARGIN inflation (composited.rs:28) — same path as
@@ -827,8 +827,10 @@ impl Snapdash {
                         continue;
                     }
 
-                    let mut win_settings =
-                        window_settings(self.config.widget_size.window_size(), false);
+                    let mut win_settings = window_settings(
+                        self.config.widget_settings.widget_size.window_size(),
+                        false,
+                    );
                     if let Some(saved) = self.config.widget_positions.get(&widget) {
                         win_settings.position =
                             window::Position::Specific(iced::Point::new(saved.x, saved.y));
@@ -1039,11 +1041,11 @@ impl Snapdash {
             }
 
             Message::AdaptiveFontChanged(b) => {
-                self.config.adaptive.adaptive_font = b;
+                self.config.widget_settings.adaptive.adaptive_font = b;
                 self.save_config()
             }
             Message::AdaptiveValueChanged(b) => {
-                self.config.adaptive.adaptive_value = b;
+                self.config.widget_settings.adaptive.adaptive_value = b;
                 self.save_config()
             }
         }

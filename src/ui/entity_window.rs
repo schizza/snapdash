@@ -67,8 +67,7 @@ pub fn view(
     p: Palette,
     connected: bool,
     update: bool,
-    size: crate::widget_size::WidgetSize,
-    adaptive: crate::widget_size::Adaptive,
+    widget_settings: crate::config::WidgetSettings,
 ) -> Element<'_, Message> {
     let (friendly, main_opt, detail) = format_main_value(state);
     let update_icon: Element<Message> = if update {
@@ -89,7 +88,7 @@ pub fn view(
         row![
             column![
                 text(name)
-                    .size(size.title_font())
+                    .size(widget_settings.widget_size.title_font())
                     .style(move |_: &iced::Theme| {
                         iced::widget::text::Style {
                             color: Some(p.text_secondary),
@@ -102,7 +101,7 @@ pub fn view(
     } else {
         row![
             text(pretty_name(&state.entity_id))
-                .size(size.title_font())
+                .size(widget_settings.widget_size.title_font())
                 .style(move |_: &iced::Theme| iced::widget::text::Style {
                     color: Some(p.text_secondary),
                 }),
@@ -111,9 +110,11 @@ pub fn view(
     };
 
     let main = main_opt.unwrap_or_else(|| "-".into());
-    let maybe_adapted_value = adaptive.adapted_value(&main);
-    let maybe_adaptet_font =
-        adaptive.font_size(size.value_font(), maybe_adapted_value.chars().count());
+    let maybe_adapted_value = widget_settings.adaptive.adapted_value(&main);
+    let maybe_adaptet_font = widget_settings.adaptive.font_size(
+        widget_settings.widget_size.value_font(),
+        maybe_adapted_value.chars().count(),
+    );
     let value_text = text(maybe_adapted_value)
         .size(maybe_adaptet_font)
         .wrapping(iced::widget::text::Wrapping::None)
@@ -123,7 +124,7 @@ pub fn view(
 
     let detail_line: Element<'static, Message> = if let Some(d) = detail {
         text(d)
-            .size(size.detail_font())
+            .size(widget_settings.widget_size.detail_font())
             .style(move |_: &iced::Theme| iced::widget::text::Style {
                 color: Some(p.text_dim),
             })
@@ -136,17 +137,17 @@ pub fn view(
 
     let inner = column![
         title_text,
-        space().height(size.title_value_gap()),
+        space().height(widget_settings.widget_size.title_value_gap()),
         value_text,
-        space().height(size.value_detail_gap()),
+        space().height(widget_settings.widget_size.value_detail_gap()),
         {
-            if size == WidgetSize::Small {
+            if widget_settings.widget_size == WidgetSize::Small {
                 space().height(0).width(0).into()
             } else {
                 detail_line
             }
         },
-        status_line(p, connected, size),
+        status_line(p, connected, widget_settings.widget_size),
     ]
     .spacing(0)
     .width(Length::Fill);
