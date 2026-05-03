@@ -13,7 +13,7 @@ use iced::window;
 use iced::{Element, Task};
 
 use crate::config::{Config, WidgetPosition};
-use crate::ha::token;
+use crate::ha::token::{self, TokenPresence};
 use crate::theme::ThemeKind;
 
 use super::window::{EntityWindowState, WindowKind, WindowState, find_window_id};
@@ -34,6 +34,7 @@ pub enum FocusDirection {
 #[derive(Debug)]
 pub struct Snapdash {
     pub config: Config,
+    pub token_presence: TokenPresence,
     pub theme: ThemeKind,
 
     pub ha: ha::HaState,
@@ -127,6 +128,10 @@ pub enum Message {
     RestartAfterUpdate(std::path::PathBuf),
 
     AutostartChanged(bool),
+
+    CheckHaTokenPresence,
+    HaTokenPresenceChecked(TokenPresence),
+    RetryHaTokenPresence,
 }
 
 impl Default for Snapdash {
@@ -139,6 +144,7 @@ impl Snapdash {
     pub fn new() -> Self {
         Self {
             config: Config::default(),
+            token_presence: TokenPresence::Unchecked,
             theme: ThemeKind::default(),
             ha: ha::HaState::default(),
             status: "-".into(),
@@ -314,12 +320,14 @@ impl Snapdash {
             HaEvent::Connected => {
                 self.ha.connected = true;
                 self.set_status("HA Connected", LogType::Info);
+                self.ha.auth_failed = false;
                 Task::none()
             }
             HaEvent::Disconnected(error) => {
                 self.ha.connected = false;
                 let (msg, severity) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, severity);
+                self.ha.auth_failed = false;
                 Task::none()
             }
             HaEvent::InitialState(states) => {
@@ -333,7 +341,7 @@ impl Snapdash {
             HaEvent::AuthFailed(error) => {
                 self.ha.connected = false;
                 self.ha.connection = None;
-                self.config.ha_token_present = false;
+                self.ha.auth_failed = true;
 
                 let (msg, _) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, LogType::Error);
@@ -469,6 +477,45 @@ impl Snapdash {
                 std::process::exit(0);
             }
 
+            Message::CheckHaTokenPresence | Message::RetryHaTokenPresence => {
+                self.token_presence = TokenPresence::Checking;
+
+                Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(token::presence)
+                            .await
+                            .unwrap_or_else(|e| TokenPresence::AccessFailed(e.to_string()))
+                    },
+                    Message::HaTokenPresenceChecked,
+                )
+            }
+
+            Message::HaTokenPresenceChecked(token_status) => match token_status {
+                TokenPresence::AccessFailed(e) => {
+                    self.set_status(format!("Token auth failed: {e}"), LogType::Error);
+                    self.token_presence = TokenPresence::AccessFailed(e);
+                    Task::none()
+                }
+                TokenPresence::Missing => {
+                    self.token_presence = TokenPresence::Missing;
+                    self.config.ha_token_present = false;
+                    self.save_config()
+                }
+                TokenPresence::Present => {
+                    self.token_presence = TokenPresence::Present;
+                    self.config.ha_token_present = true;
+                    let mut tasks: Vec<Task<Message>> = vec![self.save_config()];
+
+                    if !self.config.ha_url.trim().is_empty() {
+                        let ha_connect = Task::perform(async {}, |_| Message::ConnectHa);
+                        tasks.push(ha_connect);
+                    }
+                    Task::batch(tasks)
+                }
+                TokenPresence::Checking => Task::none(),
+                TokenPresence::Unchecked => Task::none(),
+            },
+
             Message::WidgetSizeChanged(size) => {
                 self.config.widget_size = size;
 
@@ -549,32 +596,55 @@ impl Snapdash {
                 Task::none()
             }
 
-            Message::HaTokenDelete => {
-                match token::delete() {
-                    Ok(_) => {
-                        self.set_status("Token deleted from key-chain", LogType::Info);
-                        self.config.ha_token_present = false;
-                        self.ha.connection = None;
-                        self.ha.connected = false;
-                        tracing::warn!("HA disconected due to erased token.");
-                    }
-                    Err(s) => {
-                        self.set_status(s, LogType::Error);
-                    }
-                };
-                Task::none()
-            }
+            Message::HaTokenDelete => match token::delete_raw() {
+                Ok(_) => {
+                    self.config.ha_token_present = false;
+                    self.ha.connection = None;
+                    self.ha.connected = false;
+                    self.token_presence = TokenPresence::Missing;
+                    self.set_status("Token deleted from key-chain", LogType::Info);
+                    tracing::warn!("HA disconected due to erased token.");
+                    self.save_config()
+                }
+                Err(keyring::Error::NoEntry) => {
+                    self.config.ha_token_present = false;
+                    self.ha.connection = None;
+                    self.ha.connected = false;
+                    self.token_presence = TokenPresence::Missing;
+                    self.set_status("Token deleted from key-chain", LogType::Info);
+                    tracing::warn!("HA disconected due to erased token.");
+                    self.save_config()
+                }
+                Err(e) => {
+                    self.set_status(
+                        format!("Could not delete token from key-chain {e}"),
+                        LogType::Error,
+                    );
+                    self.token_presence = TokenPresence::AccessFailed(e.to_string());
+                    Task::none()
+                }
+            },
 
             Message::ConfigLoad(res) => {
                 match res {
                     Ok(cfg) => {
+                        let mut tasks: Vec<Task<Message>> = Vec::new();
+
                         self.theme = cfg.theme;
                         self.config = cfg;
                         crate::autostart::validate_state(self.config.autostart);
+
+                        tasks.push(Task::perform(
+                            async {
+                                tokio::task::spawn_blocking(token::presence)
+                                    .await
+                                    .unwrap_or_else(|e| TokenPresence::AccessFailed(e.to_string()))
+                            },
+                            Message::HaTokenPresenceChecked,
+                        ));
+
                         self.rebuild_selected_widgets();
                         self.set_status("Config loaded", LogType::Info);
-
-                        let mut tasks: Vec<Task<Message>> = Vec::new();
 
                         if !self.boot_open_done {
                             let open_task = if self.config.widgets.is_empty() {
@@ -586,9 +656,6 @@ impl Snapdash {
                             self.boot_open_done = true;
                             tasks.push(open_task);
                         }
-
-                        let connect_task = Task::perform(async {}, |_| Message::ConnectHa);
-                        tasks.push(connect_task);
 
                         return if tasks.is_empty() {
                             Task::none()
@@ -690,10 +757,12 @@ impl Snapdash {
                     match token::set(self.ha.token_draft.trim()) {
                         Ok(()) => {
                             self.config.ha_token_present = true;
+                            self.token_presence = TokenPresence::Present;
                             self.ha.token_draft.clear();
                             self.set_status("Token saved into keychain.", LogType::Info);
                         }
                         Err(e) => {
+                            self.token_presence = TokenPresence::AccessFailed(e.to_string());
                             self.set_status(format!("Keychain error: {e}"), LogType::Error);
                             return Task::none();
                         }
@@ -783,20 +852,41 @@ impl Snapdash {
             }
 
             Message::ConnectHa => {
-                if !self.config.ha_enabled() {
+                if self.config.ha_url.trim().is_empty()
+                    || matches!(self.token_presence, TokenPresence::Missing)
+                {
                     self.ha.connected = false;
                     self.ha.connection = None;
-                    self.set_status("HA not enabled (missing token/URL)", LogType::Error);
+                    if matches!(self.token_presence, TokenPresence::Missing) {
+                        self.set_status("HA not enabled - missing token", LogType::Error);
+                    } else {
+                        self.set_status("HA not enabled - URL", LogType::Error);
+                    }
                     return Task::none();
                 }
 
-                let stored_token = match token::get() {
+                let stored_token = match token::get_raw() {
                     Ok(t) => t,
                     Err(e) => {
+                        match e {
+                            keyring::Error::NoEntry => {
+                                self.set_status(
+                                    format!("Missing token in key-chain {e}"),
+                                    LogType::Error,
+                                );
+                                self.config.ha_token_present = false;
+                                self.token_presence = TokenPresence::Missing;
+                            }
+                            _ => {
+                                self.set_status(
+                                    format!("Access to key-chain was denied. {e}"),
+                                    LogType::Warn,
+                                );
+                                self.token_presence = TokenPresence::AccessFailed(e.to_string());
+                            }
+                        }
                         self.ha.connected = false;
                         self.ha.connection = None;
-                        self.set_status(format!("Missing token in keychain {e}"), LogType::Error);
-                        self.config.ha_token_present = false;
 
                         return self.save_config().chain(Task::done(Message::Noop));
                     }

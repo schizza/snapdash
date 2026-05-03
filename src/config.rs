@@ -56,10 +56,6 @@ impl Config {
         Ok(proj.config_dir().join("config.json"))
     }
 
-    pub fn ha_enabled(&self) -> bool {
-        !self.ha_url.trim().is_empty() && self.ha_token_present
-    }
-
     pub async fn load() -> anyhow::Result<Self> {
         let path = Self::config_path()?;
         let bytes = match tokio::fs::read(&path).await {
