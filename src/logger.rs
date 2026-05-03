@@ -87,3 +87,42 @@ pub fn log_path() -> anyhow::Result<PathBuf> {
         .context("cannot determine app data dir")?;
     Ok(proj.data_dir().join("debug.log"))
 }
+
+/// Truncates the active log file to zero bytes. The non-blocking
+/// appender keeps writing from offset 0 afterwards, so future log
+/// lines just continue normally. A few in-flight messages from the
+/// appender's internal queue may still land at the top of the
+/// freshly-cleared file — that's a tracing-appender quirk we can't
+/// avoid without restarting the subscriber.
+pub fn clear_log() -> anyhow::Result<()> {
+    let path = log_path()?;
+
+    // I logging was disabled at startup, the file may not exists.
+    // Treat that as already cleared
+    if !path.exists() {
+        return Ok(());
+    }
+
+    std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&path)
+        .with_context(|| format!("truncate log {}", path.display()))?;
+
+    tracing::info!("log file cleared");
+    Ok(())
+}
+
+pub fn get_log_size() -> anyhow::Result<u64> {
+    let path = log_path()?;
+
+    if !path.exists() {
+        anyhow::bail!(format!("log file not found {}", path.display()))
+    };
+
+    let log_size = std::fs::metadata(&path)
+        .with_context(|| format!("error reading metadata of log file {}", path.display()))?
+        .len();
+
+    Ok(log_size)
+}

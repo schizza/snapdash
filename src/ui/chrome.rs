@@ -5,7 +5,7 @@ use iced::{Alignment, Element, Length};
 
 use crate::app::{Message, WindowKind, WindowState};
 use crate::ui::icon::Icon;
-use crate::ui::theme::{UiTheme, icon_button};
+use crate::ui::theme::icon_button;
 
 /// Returns window content based on its kind (`Settings` / `Entity`).
 pub fn window_content<'a>(
@@ -20,7 +20,7 @@ pub fn window_content<'a>(
             app.theme.palette(),
             app.ha.connected,
             app.update.is_available(),
-            app.config.widget_size,
+            app.config.widget_settings,
         ),
         WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
     }
@@ -43,12 +43,12 @@ pub fn with_gear_overlay<'a>(
         return inner;
     }
 
-    let ui_theme = UiTheme::from(&app.theme);
+    let p = app.theme.palette();
 
-    let gear_button = iced::widget::button(Icon::Gear.text(ui_theme))
+    let gear_button = iced::widget::button(Icon::Gear.text(p))
         .padding(8)
         .on_press(Message::OpenSettings)
-        .style(icon_button(ui_theme, 1.0));
+        .style(icon_button(p, 1.0));
 
     let gear_layer: Element<Message> = iced::widget::container(gear_button)
         .width(Length::Fill)

@@ -113,3 +113,11 @@ pub mod metric {
     pub const PAD: f32 = 14.0;
     pub const GAP: f32 = 12.0;
 }
+
+pub mod text_size {
+    pub const NORMAL: f32 = 13.0;
+    pub const SMALL: f32 = 11.0;
+    pub const XSMALL: f32 = 10.0;
+    pub const LARGE: f32 = 15.0;
+    pub const XLARGE: f32 = 22.0;
+}

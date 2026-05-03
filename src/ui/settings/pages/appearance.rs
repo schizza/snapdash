@@ -1,46 +1,63 @@
-use iced::widget::{column, row};
-use iced::{Element, Length};
+use iced::Element;
 
 use crate::app::{Message, Snapdash};
-use crate::theme::metric;
-use crate::ui::components::{self, body_with_helper};
+use crate::ui::components::settings_components;
 use crate::widget_size::WidgetSize;
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let p = snap.theme.palette();
 
-    let theme_picker: Element<Message> =
-        components::themepicker(snap.theme_options.clone(), snap.theme, p).into();
-
-    let theme_row: Element<Message> = row![
-        components::body("Theme", p),
-        iced::widget::space().width(iced::Length::Fill),
-        theme_picker
-    ]
-    .align_y(iced::Alignment::Center)
-    .into();
-
-    let size_picker: Element<Message> = components::picker(
-        WidgetSize::ALL.to_vec(),
-        snap.config.widget_size,
-        Message::WidgetSizeChanged,
+    settings_components::page_with_sections(
+        "Appearance",
+        [
+            // Theme section
+            settings_components::section(
+                [settings_components::item_with_picker(
+                    "Theme",
+                    None,
+                    snap.theme_options.clone(),
+                    snap.theme,
+                    Message::ThemeSelected,
+                    p,
+                )],
+                p,
+            ),
+            // Widget section
+            settings_components::section(
+                [
+                    settings_components::item_with_picker(
+                        "Widget size",
+                        Some("Affects new and currently opened widgets"),
+                        WidgetSize::ALL.to_vec(),
+                        snap.config.widget_settings.widget_size,
+                        Message::WidgetSizeChanged,
+                        p,
+                    ),
+                    settings_components::item_with_toggle(
+                        "Adaptive font size",
+                        Some("Scale font on long values so they fit on one line."),
+                        snap.config.widget_settings.adaptive.adaptive_font,
+                        Message::AdaptiveFontChanged,
+                        p,
+                    ),
+                    settings_components::item_with_toggle(
+                        "Smart number formatting",
+                        Some("Compress large values - 1234567 W -> 1.23 MW"),
+                        snap.config.widget_settings.adaptive.adaptive_value,
+                        Message::AdaptiveValueChanged,
+                        p,
+                    ),
+                    settings_components::item_with_toggle(
+                        "Show status bar",
+                        None,
+                        snap.config.widget_settings.show_measurement_info,
+                        Message::ShowMeasurementInfoChanged,
+                        p,
+                    ),
+                ],
+                p,
+            ),
+        ],
         p,
     )
-    .into();
-
-    let size_row: Element<Message> = row![
-        body_with_helper("Widget size", "Affects new and currently opened widgets", p),
-        iced::widget::space().width(Length::Fill),
-        size_picker
-    ]
-    .align_y(iced::Alignment::Center)
-    .spacing(metric::GAP)
-    .into();
-
-    let body: Element<Message> = column![theme_row, size_row].spacing(metric::GAP).into();
-
-    column![components::title(snap.settings_page.label(), p), body]
-        .spacing(metric::PAD)
-        .width(Length::Fill)
-        .into()
 }

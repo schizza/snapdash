@@ -6,7 +6,7 @@
 // per-OS fallback to Segoe UI Emoji on Windows (colored emoji) vs Apple
 // Symbols on macOS (thin outline) vs whatever fontconfig resolves on Linux.
 
-use crate::ui::theme::{UiTheme, icon_text};
+use crate::{theme::Palette, ui::theme::icon_text};
 
 #[derive(Copy, Clone)]
 pub enum Icon {
@@ -16,6 +16,8 @@ pub enum Icon {
     Trash,
     Close,
     Unknown,
+    Refresh,
+    ExternalLink,
 }
 
 impl Icon {
@@ -30,13 +32,15 @@ impl Icon {
             Self::Trash => '\u{e18e}',
             Self::Close => '\u{e1b2}',
             Self::Unknown => '\u{e47b}',
+            Self::Refresh => '\u{e144}',
+            Self::ExternalLink => '\u{e0b9}',
         }
     }
 
-    pub fn text<'a>(self, ui_theme: UiTheme) -> iced::widget::Text<'a> {
+    pub fn text<'a>(self, p: Palette) -> iced::widget::Text<'a> {
         iced::widget::text(self.glyph())
             .size(Self::ICON_SIZE)
             .font(Self::ICON_FONT)
-            .style(icon_text(ui_theme, 1.0))
+            .style(icon_text(p, 1.0))
     }
 }

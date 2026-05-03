@@ -1,4 +1,4 @@
-use crate::theme::ThemeKind;
+use crate::theme::{Palette, ThemeKind};
 use iced::{Color, Theme};
 
 #[derive(Clone, Copy)]
@@ -23,10 +23,9 @@ impl From<&ThemeKind> for UiTheme {
 
 /// Styl pro "ikonové" tlačítko v pravém horním rohu (gear apod.)
 pub fn icon_button<'a>(
-    ui_theme: UiTheme,
+    p: Palette,
     alpha: f32,
 ) -> impl Fn(&Theme, iced::widget::button::Status) -> iced::widget::button::Style + 'a {
-    let p = ui_theme.palette;
     move |_theme: &Theme, _status: iced::widget::button::Status| iced::widget::button::Style {
         background: None,
         border: iced::Border {
@@ -44,11 +43,7 @@ pub fn icon_button<'a>(
 }
 
 /// Styl pro text uvnitř ikonového tlačítka (pokud ho chceš zdůraznit jinak než default text)
-pub fn icon_text<'a>(
-    ui_theme: UiTheme,
-    alpha: f32,
-) -> impl Fn(&Theme) -> iced::widget::text::Style + 'a {
-    let p = ui_theme.palette;
+pub fn icon_text<'a>(p: Palette, alpha: f32) -> impl Fn(&Theme) -> iced::widget::text::Style + 'a {
     move |_theme: &Theme| iced::widget::text::Style {
         color: Some(Color {
             a: alpha,

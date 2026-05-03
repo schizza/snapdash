@@ -1,8 +1,8 @@
 use iced::widget::{checkbox, column, container, row, text};
-use iced::{Background, Border, Element, Length};
+use iced::{Alignment, Background, Border, Element, Length, Padding};
 
 use crate::app::Message;
-use crate::theme::{Palette, metric};
+use crate::theme::{Palette, metric, text_size};
 
 pub fn status_dot(p: Palette, ok: bool) -> Element<'static, Message> {
     let color = if ok { p.success } else { p.danger };
@@ -29,32 +29,13 @@ pub fn active_sensor_section(app: &crate::app::Snapdash, p: Palette) -> Element<
 
     let mut col = column![];
     for sensor in active_sensors {
-        let id = sensor.entity_id.clone();
-        let friendly_name = sensor.friendly_name.clone();
-        let id_for_msg = id.clone();
-        let row_el = row![
-            checkbox(true)
-                .label(friendly_name)
-                .on_toggle(move |_| Message::ToggleWidget(id_for_msg.clone()))
-                .text_size(14)
-                .style(move |_, _| iced::widget::checkbox::Style {
-                    background: iced::Background::Color(p.bg),
-                    text_color: Some(p.text_primary),
-                    icon_color: p.accent,
-                    border: Border {
-                        color: p.text_primary,
-                        width: 0.5,
-                        radius: 15.0.into()
-                    }
-                }),
-            text(format!(" ({})", sensor.entity_id))
-                .size(14)
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(p.text_dim)
-                }),
-        ]
-        .padding(metric::PAD);
-        col = col.push(row_el);
+        col = col.push(sensor_row(
+            sensor.entity_id.as_str(),
+            sensor.friendly_name.as_str(),
+            true,
+            metric::PAD.into(),
+            p,
+        ));
     }
 
     crate::ui::components::scrollable(col.into(), p)
@@ -63,12 +44,6 @@ pub fn active_sensor_section(app: &crate::app::Snapdash, p: Palette) -> Element<
 }
 
 pub fn sensors_section(app: &crate::app::Snapdash, p: Palette) -> Element<'_, Message> {
-    // Seznam všech entit
-    // Např. jen senzory:
-    // let sensors = entities
-    //     .iter()
-    //     .filter(|e| e.entity_id.starts_with("sensor."));
-
     let query = app.entity_search_query.trim().to_lowercase();
 
     let sensors = app
@@ -79,38 +54,62 @@ pub fn sensors_section(app: &crate::app::Snapdash, p: Palette) -> Element<'_, Me
     let mut col = column![];
 
     for sensor in sensors {
-        let id = sensor.entity_id.clone();
-        let friendly = sensor.friendly_name.clone();
-        let selected = app.selected_widgets.contains(&id);
-
-        let id_for_msg = id.clone();
-
-        let row_el = row![
-            checkbox(selected)
-                .label(friendly)
-                .on_toggle(move |_| Message::ToggleWidget(id_for_msg.clone()))
-                .text_size(14)
-                .style(move |_, _| iced::widget::checkbox::Style {
-                    background: iced::Background::Color(p.bg),
-                    text_color: Some(p.text_primary),
-                    icon_color: p.accent,
-                    border: Border {
-                        color: p.text_primary,
-                        width: 0.5,
-                        radius: 15.0.into()
-                    }
-                }),
-            text(format!(" ({})", sensor.entity_id))
-                .size(14)
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(p.text_dim)
-                }),
-        ]
-        .padding(8);
-        col = col.push(row_el);
+        col = col.push(sensor_row(
+            sensor.entity_id.as_str(),
+            sensor.friendly_name.as_str(),
+            app.selected_widgets.contains(&sensor.entity_id),
+            8.0.into(),
+            p,
+        ));
     }
 
     crate::ui::components::scrollable(col.into(), p)
         .height(Length::Fill)
         .into()
+}
+
+fn sensor_row<'a>(
+    entity_id: &'a str,
+    friendly_name: &'a str,
+    selected: bool,
+    padding: Padding,
+    p: Palette,
+) -> Element<'a, Message> {
+    let id_for_msg = entity_id.to_owned();
+
+    column![
+        checkbox(selected)
+            .label(friendly_name)
+            .on_toggle(move |_| Message::ToggleWidget(id_for_msg.clone()))
+            .text_size(text_size::NORMAL)
+            .style(move |_, _| iced::widget::checkbox::Style {
+                background: iced::Background::Color(p.bg),
+                text_color: Some(p.text_primary),
+                icon_color: p.accent,
+                border: Border {
+                    color: p.text_primary,
+                    width: 0.5,
+                    radius: 15.0.into()
+                }
+            }),
+        row![
+            text(format!(" ({entity_id})"))
+                .size(text_size::XSMALL)
+                .wrapping(text::Wrapping::WordOrGlyph)
+                .style(move |_: &iced::Theme| iced::widget::text::Style {
+                    color: Some(p.text_dim)
+                })
+                .align_x(Alignment::Start),
+        ]
+        .width(Length::Fill)
+        .align_y(Alignment::Start)
+        .padding(Padding {
+            top: 0.0,
+            right: 6.0,
+            bottom: 0.0,
+            left: 20.0
+        })
+    ]
+    .padding(padding)
+    .into()
 }

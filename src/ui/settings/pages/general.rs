@@ -1,29 +1,20 @@
-use iced::widget::{column, row};
+use iced::widget::column;
 use iced::{Element, Length};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
-use crate::ui::components;
+use crate::ui::components::settings_components::item_with_status;
+use crate::ui::components::{self, settings_components};
 use crate::ui::icon::Icon;
-use crate::ui::theme::UiTheme;
 use crate::update;
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let p = snap.theme.palette();
-    let ui_theme = UiTheme::from(&snap.theme);
 
     // Hero
     let hero = column![
-        iced::widget::text("Snapdash")
-            .size(28)
-            .style(move |_: &iced::Theme| iced::widget::text::Style {
-                color: Some(p.text_primary),
-            }),
-        iced::widget::text(format!("Version {}", update::CURRENT_VERSION))
-            .size(13)
-            .style(move |_: &iced::Theme| iced::widget::text::Style {
-                color: Some(p.text_secondary),
-            }),
+        components::title("Snapdash", p),
+        components::label(format!("Version {}", update::CURRENT_VERSION), p)
     ]
     .spacing(4);
 
@@ -42,36 +33,64 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         p.text_dim
     };
 
-    let ha_row = stat_row("Home Assistant", ha_status_text, ha_color, p);
-    let sensors_row = stat_row(
-        "Selected senors",
-        format!("{}", snap.selected_widgets.len()),
-        p.text_body,
-        p,
-    );
-    let action_config = action_link(
-        "Edit configuration",
-        "config.json",
-        Icon::Gear,
-        Message::OpenConfigFile,
-        ui_theme,
-        p,
-    );
-    let action_logs = action_link(
-        "Open log directory",
-        "Browse runtime logs",
-        Icon::Download,
-        Message::OpenLogFile,
-        ui_theme,
-        p,
-    );
-
-    let stats = components::subcard(column![ha_row, sensors_row].spacing(metric::GAP).into(), p);
-
-    let actions = components::subcard(
-        column![action_config, action_logs]
-            .spacing(metric::GAP)
+    let ha_row = settings_components::item_with_element(
+        components::body("Home Assistant", p).into(),
+        iced::widget::text(ha_status_text)
+            .size(13)
+            .style(move |_: &iced::Theme| iced::widget::text::Style {
+                color: Some(ha_color),
+            })
             .into(),
+    );
+
+    let sensors_row = item_with_status(
+        "Selected sensors",
+        None,
+        format!("{}", snap.selected_widgets.len()),
+        p,
+    );
+    let stats = settings_components::section([ha_row, sensors_row], p);
+
+    // Behavior section
+    let mut behav_items: Vec<Element<Message>> = vec![settings_components::item_with_toggle(
+        "Start at login",
+        Some("Launch Snapdash automatically when you log into your computer."),
+        snap.config.autostart,
+        Message::AutostartChanged,
+        p,
+    )];
+
+    if cfg!(target_os = "macos") && snap.config.autostart {
+        behav_items.push(
+            components::helper(
+                "macOS may ask you to allow Snapdash in System Settings → \
+                         Login Items the first time. After approval, autostart \
+                         persists across reboots.",
+                p,
+            )
+            .into(),
+        );
+    }
+
+    let behav = settings_components::section(behav_items, p);
+
+    let actions = settings_components::section(
+        [
+            settings_components::item_with_icon_button(
+                "Edit configuration",
+                Some("Open config.json in your default editor."),
+                Icon::Gear,
+                Message::OpenConfigFile,
+                p,
+            ),
+            settings_components::item_with_icon_button(
+                "Open log directory",
+                Some("Browse runtime logs in your file manager."),
+                Icon::Download,
+                Message::OpenLogFile,
+                p,
+            ),
+        ],
         p,
     );
 
@@ -80,72 +99,10 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         hero,
         iced::widget::space().height(metric::PAD),
         stats,
+        behav,
         actions,
     ]
     .spacing(metric::PAD)
     .width(Length::Fill)
-    .into()
-}
-
-fn stat_row(
-    label: &'static str,
-    value: String,
-    value_color: iced::Color,
-    p: crate::theme::Palette,
-) -> Element<'static, Message> {
-    row![
-        iced::widget::text(label)
-            .size(13)
-            .style(move |_: &iced::Theme| {
-                iced::widget::text::Style {
-                    color: Some(p.text_dim),
-                }
-            }),
-        iced::widget::space().width(Length::Fill),
-        iced::widget::text(value)
-            .size(11)
-            .style(move |_: &iced::Theme| {
-                iced::widget::text::Style {
-                    color: Some(value_color),
-                }
-            }),
-    ]
-    .align_y(iced::Alignment::Center)
-    .into()
-}
-
-fn action_link<'a>(
-    label: &'static str,
-    helper: &'static str,
-    icon: Icon,
-    msg: Message,
-    ui_theme: UiTheme,
-    p: crate::theme::Palette,
-) -> Element<'a, Message> {
-    row![
-        column![
-            iced::widget::text(label)
-                .size(13)
-                .style(move |_: &iced::Theme| {
-                    iced::widget::text::Style {
-                        color: Some(p.text_body),
-                    }
-                }),
-            iced::widget::text(helper)
-                .size(11)
-                .style(move |_: &iced::Theme| {
-                    iced::widget::text::Style {
-                        color: Some(p.text_dim),
-                    }
-                }),
-        ]
-        .spacing(2)
-        .width(Length::Fill),
-        iced::widget::mouse_area(icon.text(ui_theme).size(14).color(p.text_dim),)
-            .on_press(msg)
-            .interaction(iced::mouse::Interaction::Pointer)
-    ]
-    .align_y(iced::Alignment::Center)
-    .spacing(metric::GAP)
     .into()
 }

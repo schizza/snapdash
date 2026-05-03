@@ -15,11 +15,13 @@ pub struct Config {
     #[serde(default)]
     pub debug_overlay: bool,
     #[serde(default)]
+    pub autostart: bool,
+    #[serde(default)]
+    pub widget_settings: WidgetSettings,
+    #[serde(default)]
     pub widgets: Vec<String>,
     #[serde(default)]
     pub widget_positions: HashMap<String, WidgetPosition>,
-    #[serde(default)]
-    pub widget_size: crate::widget_size::WidgetSize,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq)]
@@ -28,16 +30,31 @@ pub struct WidgetPosition {
     pub y: f32,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct WidgetSettings {
+    #[serde(default)]
+    pub widget_size: crate::widget_size::WidgetSize,
+    #[serde(default)]
+    pub adaptive: crate::widget_size::Adaptive,
+    #[serde(default)]
+    pub show_measurement_info: bool,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             ha_url: "http://localhost:8123".into(),
             theme: ThemeKind::default(),
             ha_token_present: false,
+            autostart: false,
             debug_overlay: false,
             widgets: Vec::new(),
             widget_positions: HashMap::new(),
-            widget_size: crate::widget_size::WidgetSize::default(),
+            widget_settings: WidgetSettings {
+                widget_size: crate::widget_size::WidgetSize::default(),
+                adaptive: crate::widget_size::Adaptive::default(),
+                show_measurement_info: true,
+            },
         }
     }
 }
@@ -51,10 +68,6 @@ impl Config {
     pub fn config_path() -> Result<PathBuf> {
         let proj = Self::project_dirs()?;
         Ok(proj.config_dir().join("config.json"))
-    }
-
-    pub fn ha_enabled(&self) -> bool {
-        !self.ha_url.trim().is_empty() && self.ha_token_present
     }
 
     pub async fn load() -> anyhow::Result<Self> {

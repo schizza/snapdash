@@ -1,4 +1,3 @@
-use crate::ha;
 use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
@@ -6,6 +5,7 @@ use crate::ui::platform::window_settings;
 use crate::ui::settings::*;
 use crate::update;
 use crate::widget_size::WidgetSize;
+use crate::{ha, logger};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use iced::window;
 use iced::{Element, Task};
 
 use crate::config::{Config, WidgetPosition};
-use crate::ha::token;
+use crate::ha::token::{self, TokenPresence};
 use crate::theme::ThemeKind;
 
 use super::window::{EntityWindowState, WindowKind, WindowState, find_window_id};
@@ -34,6 +34,7 @@ pub enum FocusDirection {
 #[derive(Debug)]
 pub struct Snapdash {
     pub config: Config,
+    pub token_presence: TokenPresence,
     pub theme: ThemeKind,
 
     pub ha: ha::HaState,
@@ -66,6 +67,7 @@ pub struct Snapdash {
 pub enum Message {
     Noop,
     OpenSettings,
+    OpenSettingsTo(SettingsPage),
     OpenEntity(String),
     OpenReleaseNotes,
     OpenUrl(String),
@@ -118,6 +120,7 @@ pub enum Message {
 
     OpenConfigFile,
     OpenLogFile,
+    TruncateLogFile,
     ResetConfig,
 
     WidgetSizeChanged(WidgetSize),
@@ -125,6 +128,16 @@ pub enum Message {
     InstallUpdate,
     UpdateInstelled(Result<std::path::PathBuf, String>),
     RestartAfterUpdate(std::path::PathBuf),
+
+    AutostartChanged(bool),
+
+    CheckHaTokenPresence,
+    HaTokenPresenceChecked(TokenPresence),
+    RetryHaTokenPresence,
+
+    AdaptiveFontChanged(bool),
+    AdaptiveValueChanged(bool),
+    ShowMeasurementInfoChanged(bool),
 }
 
 impl Default for Snapdash {
@@ -137,6 +150,7 @@ impl Snapdash {
     pub fn new() -> Self {
         Self {
             config: Config::default(),
+            token_presence: TokenPresence::Unchecked,
             theme: ThemeKind::default(),
             ha: ha::HaState::default(),
             status: "-".into(),
@@ -312,12 +326,14 @@ impl Snapdash {
             HaEvent::Connected => {
                 self.ha.connected = true;
                 self.set_status("HA Connected", LogType::Info);
+                self.ha.auth_failed = false;
                 Task::none()
             }
             HaEvent::Disconnected(error) => {
                 self.ha.connected = false;
                 let (msg, severity) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, severity);
+                self.ha.auth_failed = false;
                 Task::none()
             }
             HaEvent::InitialState(states) => {
@@ -331,7 +347,7 @@ impl Snapdash {
             HaEvent::AuthFailed(error) => {
                 self.ha.connected = false;
                 self.ha.connection = None;
-                self.config.ha_token_present = false;
+                self.ha.auth_failed = true;
 
                 let (msg, _) = Snapdash::ha_error_status(&error);
                 self.set_status(msg, LogType::Error);
@@ -375,6 +391,27 @@ impl Snapdash {
         match message {
             Message::Noop => Task::none(),
 
+            Message::AutostartChanged(want) => {
+                let previous = self.config.autostart;
+                self.config.autostart = want;
+
+                let result = if want {
+                    crate::autostart::enable()
+                } else {
+                    crate::autostart::disable()
+                };
+
+                if let Err(e) = result {
+                    self.config.autostart = previous;
+                    tracing::error!(error = %e, want, "autostart update failed");
+                    self.set_status(format!("Autostart change failed: {e}"), LogType::Error);
+                    return Task::none();
+                }
+
+                let action = if want { "enabled" } else { "disabled" };
+                self.set_status(format!("Autostart {action}"), LogType::Info);
+                self.save_config()
+            }
             Message::InstallUpdate => {
                 // Guard
                 if !matches!(
@@ -446,8 +483,47 @@ impl Snapdash {
                 std::process::exit(0);
             }
 
+            Message::CheckHaTokenPresence | Message::RetryHaTokenPresence => {
+                self.token_presence = TokenPresence::Checking;
+
+                Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(token::presence)
+                            .await
+                            .unwrap_or_else(|e| TokenPresence::AccessFailed(e.to_string()))
+                    },
+                    Message::HaTokenPresenceChecked,
+                )
+            }
+
+            Message::HaTokenPresenceChecked(token_status) => match token_status {
+                TokenPresence::AccessFailed(e) => {
+                    self.set_status(format!("Token auth failed: {e}"), LogType::Error);
+                    self.token_presence = TokenPresence::AccessFailed(e);
+                    Task::none()
+                }
+                TokenPresence::Missing => {
+                    self.token_presence = TokenPresence::Missing;
+                    self.config.ha_token_present = false;
+                    self.save_config()
+                }
+                TokenPresence::Present => {
+                    self.token_presence = TokenPresence::Present;
+                    self.config.ha_token_present = true;
+                    let mut tasks: Vec<Task<Message>> = vec![self.save_config()];
+
+                    if !self.config.ha_url.trim().is_empty() {
+                        let ha_connect = Task::perform(async {}, |_| Message::ConnectHa);
+                        tasks.push(ha_connect);
+                    }
+                    Task::batch(tasks)
+                }
+                TokenPresence::Checking => Task::none(),
+                TokenPresence::Unchecked => Task::none(),
+            },
+
             Message::WidgetSizeChanged(size) => {
-                self.config.widget_size = size;
+                self.config.widget_settings.widget_size = size;
 
                 // Route the card size through the platform helper so Linux gets its
                 // SHADOW_MARGIN inflation (composited.rs:28) — same path as
@@ -511,6 +587,17 @@ impl Snapdash {
                 self.save_config()
             }
 
+            Message::TruncateLogFile => match logger::clear_log() {
+                Ok(_) => {
+                    self.set_status("Log has been truncated.", LogType::DoNotLog);
+                    Task::none()
+                }
+                Err(e) => {
+                    self.set_status(format!("Can not clear log. {e}"), LogType::Warn);
+                    Task::none()
+                }
+            },
+
             Message::SettingsPageSelected(page) => {
                 self.settings_page = page;
                 Task::none()
@@ -526,31 +613,55 @@ impl Snapdash {
                 Task::none()
             }
 
-            Message::HaTokenDelete => {
-                match token::delete() {
-                    Ok(_) => {
-                        self.set_status("Token deleted from key-chain", LogType::Info);
-                        self.config.ha_token_present = false;
-                        self.ha.connection = None;
-                        self.ha.connected = false;
-                        tracing::warn!("HA disconected due to erased token.");
-                    }
-                    Err(s) => {
-                        self.set_status(s, LogType::Error);
-                    }
-                };
-                Task::none()
-            }
+            Message::HaTokenDelete => match token::delete_raw() {
+                Ok(_) => {
+                    self.config.ha_token_present = false;
+                    self.ha.connection = None;
+                    self.ha.connected = false;
+                    self.token_presence = TokenPresence::Missing;
+                    self.set_status("Token deleted from key-chain", LogType::Info);
+                    tracing::warn!("HA disconected due to erased token.");
+                    self.save_config()
+                }
+                Err(keyring::Error::NoEntry) => {
+                    self.config.ha_token_present = false;
+                    self.ha.connection = None;
+                    self.ha.connected = false;
+                    self.token_presence = TokenPresence::Missing;
+                    self.set_status("Token deleted from key-chain", LogType::Info);
+                    tracing::warn!("HA disconected due to erased token.");
+                    self.save_config()
+                }
+                Err(e) => {
+                    self.set_status(
+                        format!("Could not delete token from key-chain {e}"),
+                        LogType::Error,
+                    );
+                    self.token_presence = TokenPresence::AccessFailed(e.to_string());
+                    Task::none()
+                }
+            },
 
             Message::ConfigLoad(res) => {
                 match res {
                     Ok(cfg) => {
+                        let mut tasks: Vec<Task<Message>> = Vec::new();
+
                         self.theme = cfg.theme;
                         self.config = cfg;
+                        crate::autostart::validate_state(self.config.autostart);
+
+                        tasks.push(Task::perform(
+                            async {
+                                tokio::task::spawn_blocking(token::presence)
+                                    .await
+                                    .unwrap_or_else(|e| TokenPresence::AccessFailed(e.to_string()))
+                            },
+                            Message::HaTokenPresenceChecked,
+                        ));
+
                         self.rebuild_selected_widgets();
                         self.set_status("Config loaded", LogType::Info);
-
-                        let mut tasks: Vec<Task<Message>> = Vec::new();
 
                         if !self.boot_open_done {
                             let open_task = if self.config.widgets.is_empty() {
@@ -562,9 +673,6 @@ impl Snapdash {
                             self.boot_open_done = true;
                             tasks.push(open_task);
                         }
-
-                        let connect_task = Task::perform(async {}, |_| Message::ConnectHa);
-                        tasks.push(connect_task);
 
                         return if tasks.is_empty() {
                             Task::none()
@@ -666,10 +774,12 @@ impl Snapdash {
                     match token::set(self.ha.token_draft.trim()) {
                         Ok(()) => {
                             self.config.ha_token_present = true;
+                            self.token_presence = TokenPresence::Present;
                             self.ha.token_draft.clear();
                             self.set_status("Token saved into keychain.", LogType::Info);
                         }
                         Err(e) => {
+                            self.token_presence = TokenPresence::AccessFailed(e.to_string());
                             self.set_status(format!("Keychain error: {e}"), LogType::Error);
                             return Task::none();
                         }
@@ -681,6 +791,10 @@ impl Snapdash {
             Message::Saved => {
                 self.set_status("Saved", LogType::DoNotLog);
                 Task::perform(async {}, |_| Message::ConnectHa)
+            }
+            Message::OpenSettingsTo(page) => {
+                self.settings_page = page;
+                self.update(Message::OpenSettings)
             }
 
             Message::OpenSettings => {
@@ -719,8 +833,10 @@ impl Snapdash {
                         continue;
                     }
 
-                    let mut win_settings =
-                        window_settings(self.config.widget_size.window_size(), false);
+                    let mut win_settings = window_settings(
+                        self.config.widget_settings.widget_size.window_size(),
+                        false,
+                    );
                     if let Some(saved) = self.config.widget_positions.get(&widget) {
                         win_settings.position =
                             window::Position::Specific(iced::Point::new(saved.x, saved.y));
@@ -759,20 +875,57 @@ impl Snapdash {
             }
 
             Message::ConnectHa => {
-                if !self.config.ha_enabled() {
+                if self.config.ha_url.trim().is_empty() {
                     self.ha.connected = false;
                     self.ha.connection = None;
-                    self.set_status("HA not enabled (missing token/URL)", LogType::Error);
+                    self.set_status("HA not enabled - URL", LogType::Error);
                     return Task::none();
                 }
 
-                let stored_token = match token::get() {
-                    Ok(t) => t,
-                    Err(e) => {
+                match &self.token_presence {
+                    TokenPresence::Present => {}
+                    TokenPresence::Missing => {
                         self.ha.connected = false;
                         self.ha.connection = None;
-                        self.set_status(format!("Missing token in keychain {e}"), LogType::Error);
-                        self.config.ha_token_present = false;
+                        self.set_status("HA not enabled - missing token", LogType::Error);
+                        return Task::none();
+                    }
+                    TokenPresence::AccessFailed(e) => {
+                        self.ha.connected = false;
+                        self.ha.connection = None;
+                        self.set_status(format!("Keychain access needed: {e}"), LogType::Warn);
+                        return Task::none();
+                    }
+                    TokenPresence::Checking => {
+                        self.set_status("Checking token in keychain...", LogType::DoNotLog);
+                        return Task::none();
+                    }
+                    TokenPresence::Unchecked => {
+                        return Task::done(Message::CheckHaTokenPresence);
+                    }
+                }
+                let stored_token = match token::get_raw() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        match e {
+                            keyring::Error::NoEntry => {
+                                self.set_status(
+                                    format!("Missing token in key-chain {e}"),
+                                    LogType::Error,
+                                );
+                                self.config.ha_token_present = false;
+                                self.token_presence = TokenPresence::Missing;
+                            }
+                            _ => {
+                                self.set_status(
+                                    format!("Access to key-chain was denied. {e}"),
+                                    LogType::Warn,
+                                );
+                                self.token_presence = TokenPresence::AccessFailed(e.to_string());
+                            }
+                        }
+                        self.ha.connected = false;
+                        self.ha.connection = None;
 
                         return self.save_config().chain(Task::done(Message::Noop));
                     }
@@ -890,6 +1043,20 @@ impl Snapdash {
                     return Task::none();
                 }
                 self.last_widget_move_at = None;
+                self.save_config()
+            }
+
+            Message::AdaptiveFontChanged(b) => {
+                self.config.widget_settings.adaptive.adaptive_font = b;
+                self.save_config()
+            }
+            Message::AdaptiveValueChanged(b) => {
+                self.config.widget_settings.adaptive.adaptive_value = b;
+                self.save_config()
+            }
+
+            Message::ShowMeasurementInfoChanged(b) => {
+                self.config.widget_settings.show_measurement_info = b;
                 self.save_config()
             }
         }

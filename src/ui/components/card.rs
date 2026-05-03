@@ -2,7 +2,7 @@ use iced::widget::{column, container, row, stack, text};
 use iced::{Background, Border, Element, Length};
 
 use crate::app::Message;
-use crate::theme::{Palette, metric};
+use crate::theme::{Palette, metric, text_size};
 
 pub fn card(content: Element<Message>, p: Palette) -> Element<Message> {
     container(content)
@@ -127,14 +127,14 @@ pub fn fieldset<'a>(
     content: Element<'a, Message>,
     p: Palette,
 ) -> Element<'a, Message> {
-    let legend_chip: Element<'a, Message> = container(text(legend).size(13).style(
+    let legend_chip: Element<'a, Message> = container(text(legend).size(text_size::SMALL).style(
         move |_: &iced::Theme| iced::widget::text::Style {
             color: Some(p.text_dim),
         },
     ))
     .padding([0, 8])
     .style(move |_: &iced::Theme| iced::widget::container::Style {
-        background: Some(Background::Color(p.card_2)),
+        background: Some(p.card_2.into()),
         ..Default::default()
     })
     .into();
