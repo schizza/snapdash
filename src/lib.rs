@@ -2,6 +2,7 @@ pub mod app;
 pub mod autostart;
 pub mod config;
 pub mod ha;
+pub mod helpers;
 pub mod logger;
 pub mod theme;
 pub mod ui;

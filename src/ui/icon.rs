@@ -17,6 +17,7 @@ pub enum Icon {
     Close,
     Unknown,
     Refresh,
+    ExternalLink,
 }
 
 impl Icon {
@@ -32,6 +33,7 @@ impl Icon {
             Self::Close => '\u{e1b2}',
             Self::Unknown => '\u{e47b}',
             Self::Refresh => '\u{e144}',
+            Self::ExternalLink => '\u{e0b9}',
         }
     }
 
