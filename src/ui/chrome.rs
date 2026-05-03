@@ -21,6 +21,7 @@ pub fn window_content<'a>(
             app.ha.connected,
             app.update.is_available(),
             app.config.widget_size,
+            app.config.adaptive,
         ),
         WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
     }

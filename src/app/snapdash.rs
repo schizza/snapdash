@@ -133,6 +133,9 @@ pub enum Message {
     CheckHaTokenPresence,
     HaTokenPresenceChecked(TokenPresence),
     RetryHaTokenPresence,
+
+    AdaptiveFontChanged(bool),
+    AdaptiveValueChanged(bool),
 }
 
 impl Default for Snapdash {
@@ -1032,6 +1035,15 @@ impl Snapdash {
                     return Task::none();
                 }
                 self.last_widget_move_at = None;
+                self.save_config()
+            }
+
+            Message::AdaptiveFontChanged(b) => {
+                self.config.adaptive.adaptive_font = b;
+                self.save_config()
+            }
+            Message::AdaptiveValueChanged(b) => {
+                self.config.adaptive.adaptive_value = b;
                 self.save_config()
             }
         }

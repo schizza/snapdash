@@ -22,6 +22,8 @@ pub struct Config {
     pub widget_positions: HashMap<String, WidgetPosition>,
     #[serde(default)]
     pub widget_size: crate::widget_size::WidgetSize,
+    #[serde(default)]
+    pub adaptive: crate::widget_size::Adaptive,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq)]
@@ -41,6 +43,7 @@ impl Default for Config {
             widgets: Vec::new(),
             widget_positions: HashMap::new(),
             widget_size: crate::widget_size::WidgetSize::default(),
+            adaptive: crate::widget_size::Adaptive::default(),
         }
     }
 }

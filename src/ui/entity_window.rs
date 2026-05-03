@@ -68,6 +68,7 @@ pub fn view(
     connected: bool,
     update: bool,
     size: crate::widget_size::WidgetSize,
+    adaptive: crate::widget_size::Adaptive,
 ) -> Element<'_, Message> {
     let (friendly, main_opt, detail) = format_main_value(state);
     let update_icon: Element<Message> = if update {
@@ -110,9 +111,11 @@ pub fn view(
     };
 
     let main = main_opt.unwrap_or_else(|| "-".into());
-    let value_size = size.value_font_for(main.chars().count());
-    let value_text = text(main)
-        .size(value_size)
+    let maybe_adapted_value = adaptive.adapted_value(&main);
+    let maybe_adaptet_font =
+        adaptive.font_size(size.value_font(), maybe_adapted_value.chars().count());
+    let value_text = text(maybe_adapted_value)
+        .size(maybe_adaptet_font)
         .wrapping(iced::widget::text::Wrapping::None)
         .style(move |_: &iced::Theme| iced::widget::text::Style {
             color: Some(p.text_primary),
