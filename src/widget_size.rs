@@ -4,6 +4,45 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::helpers;
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Adaptive {
+    pub adaptive_font: bool,
+    pub adaptive_value: bool,
+}
+
+impl Adaptive {
+    /// Returns the font size value to use for the
+    /// given text lenght.
+    /// Shrink gracefully, so long values stays on one
+    /// line and don`t push the widget layout aroud.
+    pub fn font_size(self, base: f32, text_len: usize) -> f32 {
+        if !self.adaptive_font {
+            return base;
+        }
+
+        let factor = match text_len {
+            0..=9 => 1.0,
+            10 => 0.85,
+            11..=13 => 0.7,
+            _ => 0.55,
+        };
+        base * factor
+    }
+
+    /// Humanize a numeric value if self.adaptive_value is on.
+    /// TODO: implement compression (1234567 -> 1.23M).
+    /// For now passes the raw value.
+    pub fn adapted_value(self, raw: &str) -> String {
+        if !self.adaptive_value {
+            return raw.to_string();
+        }
+
+        helpers::humanize_magnitude(raw)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum WidgetSize {
     Small,
@@ -77,3 +116,6 @@ impl WidgetSize {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
