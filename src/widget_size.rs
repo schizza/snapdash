@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::helpers;
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Adaptive {
     pub adaptive_font: bool,
@@ -37,8 +39,7 @@ impl Adaptive {
             return raw.to_string();
         }
 
-        // future: smart format
-        raw.to_string()
+        helpers::humanize_magnitude(raw)
     }
 }
 
@@ -115,3 +116,6 @@ impl WidgetSize {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

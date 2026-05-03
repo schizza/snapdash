@@ -23,30 +23,10 @@ fn format_main_value(
     }
 }
 
-fn status_line(p: Palette, connected: bool, size: WidgetSize) -> Element<'static, Message> {
+fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
     let dot = components::status_dot(p, connected);
 
-    let label = if connected {
-        "connected"
-    } else {
-        "disconected"
-    };
-
-    if size == WidgetSize::Small {
-        row![dot].spacing(8).align_y(Alignment::Center).into()
-    } else {
-        row![
-            dot,
-            text(label)
-                .size(size.detail_font())
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(if connected { p.text_dim } else { p.danger })
-                }),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .into()
-    }
+    row![dot].spacing(8).align_y(Alignment::End).into()
 }
 
 fn pulse_border(p: Palette, pulse: f32) -> iced::Color {
@@ -70,21 +50,22 @@ pub fn view(
     widget_settings: crate::config::WidgetSettings,
 ) -> Element<'_, Message> {
     let (friendly, main_opt, detail) = format_main_value(state);
-    let update_icon: Element<Message> = if update {
-        mouse_area(components::dimmed(
-            '⤓',
-            crate::theme::Palette {
-                text_dim: iced::Color::from_rgb8(255, 0, 0),
-                ..p
-            },
-        ))
+
+    let update_button = components::icon_button(
+        crate::ui::icon::Icon::Download,
+        components::tooltip_message("Update available", crate::ui::theme::MessageType::Error, p),
+        Some(p.danger),
+        Some(widget_settings.widget_size.title_font()),
+        Message::OpenSettingsTo(crate::ui::settings::SettingsPage::Updates),
+        p,
+    );
+
+    let update_icon: Element<Message> = mouse_area(update_button)
         .on_press(Message::OpenReleaseNotes)
         .interaction(iced::mouse::Interaction::Pointer)
-        .into()
-    } else {
-        components::dimmed("", p).into()
-    };
-    let title_text = if let Some(name) = friendly {
+        .into();
+
+    let mut title_text = if let Some(name) = friendly {
         row![
             column![
                 text(name)
@@ -96,7 +77,6 @@ pub fn view(
                     }),
             ]
             .width(iced::Fill),
-            update_icon
         ]
     } else {
         row![
@@ -105,9 +85,12 @@ pub fn view(
                 .style(move |_: &iced::Theme| iced::widget::text::Style {
                     color: Some(p.text_secondary),
                 }),
-            update_icon
         ]
     };
+
+    if update {
+        title_text = title_text.push(update_icon)
+    }
 
     let main = main_opt.unwrap_or_else(|| "-".into());
     let maybe_adapted_value = widget_settings.adaptive.adapted_value(&main);
@@ -133,24 +116,36 @@ pub fn view(
         space().height(0).width(0).into()
     };
 
+    let disconnected_text =
+        components::error_message("You are disconected from Home Assistant!", p);
+
     let ring = pulse_border(p, state.pulse);
 
     let inner = column![
         title_text,
         space().height(widget_settings.widget_size.title_value_gap()),
-        value_text,
+        {
+            if !connected {
+                disconnected_text
+            } else {
+                value_text.into()
+            }
+        },
         space().height(widget_settings.widget_size.value_detail_gap()),
         {
-            if widget_settings.widget_size == WidgetSize::Small {
+            if widget_settings.widget_size == WidgetSize::Small
+                || !widget_settings.show_measurement_info
+            {
                 space().height(0).width(0).into()
             } else {
                 detail_line
             }
         },
-        status_line(p, connected, widget_settings.widget_size),
+        status_line(p, connected),
     ]
     .spacing(0)
-    .width(Length::Fill);
+    .width(Length::Fill)
+    .height(Length::Fill);
 
     components::card_with_border(inner.into(), p, ring)
 }

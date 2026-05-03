@@ -96,8 +96,41 @@ pub fn body_with_helper<'a>(
         .spacing(2)
         .into()
 }
-
+/// alpha is tuple: backgroud alpha, border alpha
 pub fn message<'a>(
+    content: impl IntoFragment<'a>,
+    msg_type: MessageType,
+    alpha: (f32, f32),
+    p: Palette,
+) -> Element<'a, Message> {
+    let color = match msg_type {
+        MessageType::Error => p.danger,
+        MessageType::Warning => p.accent,
+        MessageType::Success => p.success,
+    };
+
+    let (bg_a, b_a) = alpha;
+
+    iced::widget::container(
+        iced::widget::text(content)
+            .size(text_size::SMALL)
+            .style(move |_: &iced::Theme| iced::widget::text::Style { color: Some(color) }),
+    )
+    .padding([8, 12])
+    .style(move |_| iced::widget::container::Style {
+        background: Some(iced::Background::Color(iced::Color { a: bg_a, ..color })),
+        border: iced::Border {
+            radius: 6.0.into(),
+            width: 1.0,
+            color: iced::Color { a: b_a, ..color },
+        },
+        ..Default::default()
+    })
+    .width(iced::Length::Fill)
+    .into()
+}
+
+pub fn tooltip_message<'a>(
     content: impl IntoFragment<'a>,
     msg_type: MessageType,
     p: Palette,
@@ -115,7 +148,7 @@ pub fn message<'a>(
     )
     .padding([8, 12])
     .style(move |_| iced::widget::container::Style {
-        background: Some(iced::Background::Color(iced::Color { a: 0.12, ..color })),
+        background: Some(iced::Background::Color(p.card_2)),
         border: iced::Border {
             radius: 6.0.into(),
             width: 1.0,
@@ -128,9 +161,9 @@ pub fn message<'a>(
 }
 
 pub fn error_message<'a>(content: impl IntoFragment<'a>, p: Palette) -> Element<'a, Message> {
-    message(content, MessageType::Error, p)
+    message(content, MessageType::Error, (0.12, 0.4), p)
 }
 
 pub fn success_message<'a>(content: impl IntoFragment<'a>, p: Palette) -> Element<'a, Message> {
-    message(content, MessageType::Success, p)
+    message(content, MessageType::Success, (0.12, 0.4), p)
 }

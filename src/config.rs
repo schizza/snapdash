@@ -36,6 +36,8 @@ pub struct WidgetSettings {
     pub widget_size: crate::widget_size::WidgetSize,
     #[serde(default)]
     pub adaptive: crate::widget_size::Adaptive,
+    #[serde(default)]
+    pub show_measurement_info: bool,
 }
 
 impl Default for Config {
@@ -51,6 +53,7 @@ impl Default for Config {
             widget_settings: WidgetSettings {
                 widget_size: crate::widget_size::WidgetSize::default(),
                 adaptive: crate::widget_size::Adaptive::default(),
+                show_measurement_info: true,
             },
         }
     }

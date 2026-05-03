@@ -67,6 +67,7 @@ pub struct Snapdash {
 pub enum Message {
     Noop,
     OpenSettings,
+    OpenSettingsTo(SettingsPage),
     OpenEntity(String),
     OpenReleaseNotes,
     OpenUrl(String),
@@ -136,6 +137,7 @@ pub enum Message {
 
     AdaptiveFontChanged(bool),
     AdaptiveValueChanged(bool),
+    ShowMeasurementInfoChanged(bool),
 }
 
 impl Default for Snapdash {
@@ -790,6 +792,10 @@ impl Snapdash {
                 self.set_status("Saved", LogType::DoNotLog);
                 Task::perform(async {}, |_| Message::ConnectHa)
             }
+            Message::OpenSettingsTo(page) => {
+                self.settings_page = page;
+                self.update(Message::OpenSettings)
+            }
 
             Message::OpenSettings => {
                 // if Settings window is opened, give focus
@@ -1046,6 +1052,11 @@ impl Snapdash {
             }
             Message::AdaptiveValueChanged(b) => {
                 self.config.widget_settings.adaptive.adaptive_value = b;
+                self.save_config()
+            }
+
+            Message::ShowMeasurementInfoChanged(b) => {
+                self.config.widget_settings.show_measurement_info = b;
                 self.save_config()
             }
         }
