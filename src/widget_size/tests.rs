@@ -3,7 +3,7 @@ use crate::helpers::humanize_magnitude;
 #[test]
 fn compresses_large_watts() {
     assert_eq!(humanize_magnitude("1234567 W"), "1.23 MW");
-    assert_eq!(humanize_magnitude("5000 W"), "5.00 kW");
+    assert_eq!(humanize_magnitude("5000 W"), "5 kW");
 }
 
 #[test]
@@ -31,5 +31,25 @@ fn handles_non_numeric() {
 
 #[test]
 fn compresses_small() {
-    assert_eq!(humanize_magnitude("0.0005 A"), "500.00 µA");
+    assert_eq!(humanize_magnitude("0.0005 A"), "500 µA");
+}
+#[test]
+fn does_not_scale_moderately_small_values() {
+    assert_eq!(humanize_magnitude("0.1 A"), "0.1 A");
+    assert_eq!(humanize_magnitude("0.5 A"), "0.5 A");
+    assert_eq!(humanize_magnitude("0.05 A"), "0.05 A");
+}
+
+#[test]
+fn scales_truly_small_values() {
+    assert_eq!(humanize_magnitude("0.005 A"), "5 mA");
+    assert_eq!(humanize_magnitude("0.0001 A"), "100 µA");
+    assert_eq!(humanize_magnitude("0.0051 A"), "5.1 mA");
+}
+
+#[test]
+fn trims_trailing_zeros() {
+    assert_eq!(humanize_magnitude("5000 W"), "5 kW");
+    assert_eq!(humanize_magnitude("1500 W"), "1.5 kW");
+    assert_eq!(humanize_magnitude("1230000 W"), "1.23 MW");
 }
