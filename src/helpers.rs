@@ -57,5 +57,4 @@ pub fn humanize_magnitude(raw: &str) -> String {
         .to_string();
 
     format!("{} {}{}", trimmed, prefix, unit)
-    
 }
