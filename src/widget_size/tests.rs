@@ -53,3 +53,16 @@ fn trims_trailing_zeros() {
     assert_eq!(humanize_magnitude("1500 W"), "1.5 kW");
     assert_eq!(humanize_magnitude("1230000 W"), "1.23 MW");
 }
+
+#[test]
+fn scales_into_nano_and_pico() {
+    assert_eq!(humanize_magnitude("0.000000001 A"), "1 nA"); // 1e-9
+    assert_eq!(humanize_magnitude("0.0000000005 A"), "500 pA"); // 5e-10
+    assert_eq!(humanize_magnitude("0.000000000001 A"), "1 pA"); // 1e-12
+}
+
+#[test]
+fn boundary_between_milli_and_micro() {
+    assert_eq!(humanize_magnitude("0.001 A"), "1 mA");
+    assert_eq!(humanize_magnitude("0.0001 A"), "100 µA"); // dropped from milli to micro
+}
