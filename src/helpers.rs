@@ -41,14 +41,27 @@ pub fn humanize_magnitude(raw: &str) -> String {
         (n / 1_000_000.0, "M")
     } else if abs >= 1_000.0 {
         (n / 1_000.0, "k")
+    } else if abs > 0.0 && abs < 1e-9 {
+        (n * 1e12, "p")
+    } else if abs > 0.0 && abs < 1e-6 {
+        (n * 1e9, "n")
     } else if abs > 0.0 && abs < 0.001 {
         (n * 1_000_000.0, "µ")
-    } else if abs > 0.0 && abs < 1.0 {
+    } else if abs > 0.0 && abs < 0.01 {
         (n * 1_000.0, "m")
     } else {
         // 1..1000 range — no compression needed
         return raw.to_string();
     };
 
-    format!("{:.2} {}{}", scaled, prefix, unit)
+    let formated = format!("{:.2}", scaled);
+    let trimmed = formated.trim_end_matches('0').trim_end_matches('.');
+
+    let display = if trimmed.is_empty() || trimmed == "-" {
+        formated.as_str()
+    } else {
+        trimmed
+    };
+
+    format!("{} {}{}", display, prefix, unit)
 }

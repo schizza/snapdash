@@ -37,15 +37,13 @@ impl Snapdash {
         // RedrawRequested fires on every frame, so we only subscribe while
         // an entity is animating its pulse. Otherwise we'd burn CPU on
         // idle widgets.
-        let redraw_events_needed = self.windows.values().any(|win| win.entity.pulse > 0.0);
 
-        let redraw_events = if redraw_events_needed {
-            iced::event::listen_raw(|event, _status, id| match event {
-                iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                    Some(Message::WindowRedraw(id))
-                }
-                _ => None,
-            })
+        let animation_frames = if self
+            .windows
+            .values()
+            .any(|win| win.entity.pulse.is_animating())
+        {
+            iced::time::every(Duration::from_millis(16)).map(Message::AnimationFrame)
         } else {
             Subscription::none()
         };
@@ -94,7 +92,7 @@ impl Snapdash {
 
         Subscription::batch([
             window::close_events().map(Message::WindowClosed),
-            redraw_events,
+            animation_frames,
             move_events,
             keyboard_events,
             ha,

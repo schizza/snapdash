@@ -79,6 +79,7 @@ pub enum Message {
         id: window::Id,
         kind: WindowKind,
     },
+    AnimationFrame(iced::time::Instant),
 
     ThemeSelected(ThemeKind),
     SaveConfig,
@@ -98,7 +99,6 @@ pub enum Message {
     SavePressed,
     Saved,
     HaTokenDraftChanged(String),
-    WindowRedraw(window::Id),
     ConfigLoad(Result<Config, String>),
     StartDrag(window::Id),
     EntityHover {
@@ -222,18 +222,6 @@ impl Snapdash {
         self.rebuild_active_settings_sensors();
     }
 
-    fn handle_redraw_requested(&mut self, id: window::Id) {
-        let Some(window) = self.windows.get_mut(&id) else {
-            return;
-        };
-
-        if let WindowKind::Entity { .. } = window.kind
-            && window.entity.pulse > 0.0
-        {
-            window.entity.pulse = (window.entity.pulse - 0.08).max(0.0);
-        }
-    }
-
     fn set_window_entity_state(&mut self, entity_id: &str, new_state: &EntityState, pulse: bool) {
         let Some(window_id) = self.entity_windows.get(entity_id).copied() else {
             return;
@@ -247,7 +235,7 @@ impl Snapdash {
         window.entity.last = Some(new_state.clone());
 
         if pulse {
-            window.entity.pulse = 1.0;
+            window.entity.pulse.trigger();
         }
     }
 
@@ -263,13 +251,23 @@ impl Snapdash {
         self.rebuild_settings_sensors();
     }
 
+    fn display_signature(&self, st: &EntityState) -> (String, Option<String>) {
+        let formatted = crate::ui::format::format_entity_value(st);
+        (formatted.main, formatted.detail)
+    }
+
+    fn should_pulse(&self, old: Option<&EntityState>, new: &EntityState) -> bool {
+        match old {
+            Some(old) => self.display_signature(old) != self.display_signature(new),
+            None => true,
+        }
+    }
+
     fn apply_entity_state(&mut self, new_state: EntityState) {
         let entity_id = new_state.entity_id.clone();
 
-        self.set_window_entity_state(&entity_id, &new_state, true);
-
-        let should_refresh_settings = match self.ha.entities.get(&entity_id) {
-            None => true,
+        let (pulse, should_refresh_settings) = match self.ha.entities.get(&entity_id) {
+            None => (true, true),
             Some(old) => {
                 let old_is_sensor = old.entity_id.starts_with("sensor.");
                 let new_is_sensor = new_state.entity_id.starts_with("sensor.");
@@ -280,10 +278,14 @@ impl Snapdash {
                     .get("friendly_name")
                     .and_then(|v| v.as_str());
 
-                old_is_sensor != new_is_sensor || old_name != new_name
+                (
+                    self.should_pulse(Some(old), &new_state),
+                    old_is_sensor != new_is_sensor || old_name != new_name,
+                )
             }
         };
 
+        self.set_window_entity_state(&entity_id, &new_state, pulse);
         self.ha.entities.insert(entity_id, new_state);
 
         if should_refresh_settings {
@@ -966,11 +968,6 @@ impl Snapdash {
                 }
             }
 
-            Message::WindowRedraw(id) => {
-                self.handle_redraw_requested(id);
-                Task::none()
-            }
-
             Message::CheckForUpdate => {
                 Task::perform(update::get_latest_version(), Message::LastVersionChecked)
             }
@@ -1058,6 +1055,16 @@ impl Snapdash {
             Message::ShowMeasurementInfoChanged(b) => {
                 self.config.widget_settings.show_measurement_info = b;
                 self.save_config()
+            }
+
+            Message::AnimationFrame(now) => {
+                for window in self.windows.values_mut() {
+                    if let WindowKind::Entity { .. } = window.kind {
+                        window.entity.pulse.tick(now);
+                    }
+                }
+
+                Task::none()
             }
         }
     }
