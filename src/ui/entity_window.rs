@@ -119,7 +119,7 @@ pub fn view(
     let disconnected_text =
         components::error_message("You are disconected from Home Assistant!", p);
 
-    let ring = pulse_border(p, state.pulse);
+    let ring = pulse_border(p, state.pulse.value());
 
     let inner = column![
         title_text,
