@@ -4,6 +4,7 @@ mod input;
 mod scrollable;
 mod sensors;
 pub mod settings_components;
+pub mod sparkline;
 mod text;
 
 pub use button::{

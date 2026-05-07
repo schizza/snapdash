@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Snapdash app icon">
+  <defs>
+    <linearGradient id="backdrop" x1="174" y1="88" x2="854" y2="942" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f2937"/>
+      <stop offset="0.45" stop-color="#111827"/>
+      <stop offset="1" stop-color="#05070d"/>
+    </linearGradient>
+
+    <radialGradient id="aura" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(339 235) rotate(47) scale(563 437)">
+      <stop offset="0" stop-color="#34e7e4" stop-opacity="0.64"/>
+      <stop offset="0.42" stop-color="#0a84ff" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#0a84ff" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="floorGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(641 742) rotate(-126) scale(394 327)">
+      <stop offset="0" stop-color="#31d158" stop-opacity="0.33"/>
+      <stop offset="0.48" stop-color="#0a84ff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#0a84ff" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="rim" x1="172" y1="88" x2="848" y2="930" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#65f4ff"/>
+      <stop offset="0.52" stop-color="#0a84ff"/>
+      <stop offset="1" stop-color="#6d5dfc"/>
+    </linearGradient>
+
+    <linearGradient id="lensOuter" x1="280" y1="219" x2="760" y2="804" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f9fbff"/>
+      <stop offset="0.2" stop-color="#d7e5f4"/>
+      <stop offset="0.53" stop-color="#6b7c91"/>
+      <stop offset="0.78" stop-color="#263244"/>
+      <stop offset="1" stop-color="#0b1020"/>
+    </linearGradient>
+
+    <linearGradient id="lensRing" x1="318" y1="256" x2="719" y2="766" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.28" stop-color="#cfe0f0"/>
+      <stop offset="0.65" stop-color="#233044"/>
+      <stop offset="1" stop-color="#070a12"/>
+    </linearGradient>
+
+    <linearGradient id="glass" x1="355" y1="311" x2="690" y2="699" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f2937"/>
+      <stop offset="0.42" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#020611"/>
+    </linearGradient>
+
+    <linearGradient id="bladeA" x1="374" y1="285" x2="688" y2="699" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#66f5ff"/>
+      <stop offset="1" stop-color="#0a84ff"/>
+    </linearGradient>
+
+    <linearGradient id="bladeB" x1="342" y1="376" x2="681" y2="724" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8ee6d7"/>
+      <stop offset="1" stop-color="#6d5dfc"/>
+    </linearGradient>
+
+    <linearGradient id="pulse" x1="336" y1="552" x2="705" y2="433" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0a84ff"/>
+      <stop offset="0.52" stop-color="#34e7e4"/>
+      <stop offset="1" stop-color="#31d158"/>
+    </linearGradient>
+
+    <filter id="iconShadow" x="-14%" y="-12%" width="128%" height="132%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="28" stdDeviation="30" flood-color="#02040a" flood-opacity="0.62"/>
+    </filter>
+
+    <filter id="lensShadow" x="-22%" y="-22%" width="144%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#02040a" flood-opacity="0.58"/>
+    </filter>
+
+    <filter id="lineGlow" x="-24%" y="-34%" width="148%" height="168%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="9" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <clipPath id="iconClip">
+      <rect x="88" y="72" width="848" height="880" rx="216"/>
+    </clipPath>
+
+    <clipPath id="lensClip">
+      <circle cx="512" cy="512" r="190"/>
+    </clipPath>
+  </defs>
+
+  <rect x="88" y="72" width="848" height="880" rx="216" fill="#02040a" opacity="0.18" filter="url(#iconShadow)"/>
+
+  <g clip-path="url(#iconClip)">
+    <rect x="88" y="72" width="848" height="880" rx="216" fill="url(#backdrop)"/>
+    <rect x="88" y="72" width="848" height="880" rx="216" fill="url(#aura)"/>
+    <rect x="88" y="72" width="848" height="880" rx="216" fill="url(#floorGlow)"/>
+    <path d="M88 338c140-39 298-33 474 20 139 42 263 39 374-8V72H88Z" fill="#ffffff" opacity="0.055"/>
+    <path d="M88 742c154-53 311-52 470 2 150 51 276 53 378 8v200H88Z" fill="#020611" opacity="0.58"/>
+  </g>
+
+  <rect x="88" y="72" width="848" height="880" rx="216" fill="none" stroke="url(#rim)" stroke-width="30"/>
+  <rect x="124" y="108" width="776" height="808" rx="181" fill="none" stroke="#ffffff" stroke-opacity="0.11" stroke-width="10"/>
+
+  <g opacity="0.86">
+    <path d="M246 292v-44c0-45 36-81 81-81h44" fill="none" stroke="#67f3ff" stroke-width="24" stroke-linecap="round"/>
+    <path d="M778 732v44c0 45-36 81-81 81h-44" fill="none" stroke="#31d158" stroke-width="24" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#lensShadow)">
+    <circle cx="512" cy="512" r="270" fill="#030712" opacity="0.45"/>
+    <circle cx="512" cy="512" r="255" fill="url(#lensOuter)"/>
+    <circle cx="512" cy="512" r="230" fill="#101827"/>
+    <circle cx="512" cy="512" r="214" fill="url(#lensRing)"/>
+    <circle cx="512" cy="512" r="193" fill="url(#glass)"/>
+  </g>
+
+  <g clip-path="url(#lensClip)">
+    <path d="M512 292l116 0 74 126-190 72Z" fill="url(#bladeA)" opacity="0.34"/>
+    <path d="M702 418l58 100-73 126-149-154Z" fill="#31d158" opacity="0.24"/>
+    <path d="M687 644l-58 100H482l56-254Z" fill="#0a84ff" opacity="0.33"/>
+    <path d="M482 744H366l-74-126 246-128Z" fill="url(#bladeB)" opacity="0.31"/>
+    <path d="M292 618l-58-100 73-126 231 98Z" fill="#65f4ff" opacity="0.20"/>
+    <path d="M307 392l58-100h147l26 198Z" fill="#ffffff" opacity="0.10"/>
+    <circle cx="512" cy="512" r="120" fill="#020611" opacity="0.66"/>
+  </g>
+
+  <circle cx="512" cy="512" r="190" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="14"/>
+  <circle cx="512" cy="512" r="133" fill="none" stroke="#0a84ff" stroke-opacity="0.2" stroke-width="9"/>
+
+  <g opacity="0.46">
+    <rect x="372" y="579" width="40" height="72" rx="18" fill="#d7e5f4"/>
+    <rect x="444" y="548" width="40" height="103" rx="18" fill="#d7e5f4"/>
+    <rect x="516" y="567" width="40" height="84" rx="18" fill="#d7e5f4"/>
+    <rect x="588" y="508" width="40" height="143" rx="18" fill="#d7e5f4"/>
+  </g>
+
+  <path d="M348 558l68-58 79 35 72-89 70 43 46-61" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M348 558l68-58 79 35 72-89 70 43 46-61" fill="none" stroke="url(#pulse)" stroke-width="25" stroke-linecap="round" stroke-linejoin="round" filter="url(#lineGlow)"/>
+  <circle cx="683" cy="428" r="25" fill="#31d158"/>
+  <circle cx="683" cy="428" r="10" fill="#ffffff"/>
+
+  <g fill="#ffffff" opacity="0.24">
+    <path d="M214 193c-31 22-55 50-70 86"/>
+    <path d="M813 841c31-21 55-49 70-84"/>
+  </g>
+</svg>

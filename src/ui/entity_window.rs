@@ -4,6 +4,7 @@ use iced::{Alignment, Element, Length};
 use super::components;
 use crate::app::{EntityWindowState, Message};
 use crate::theme::Palette;
+use crate::ui::components::sparkline;
 use crate::ui::format::format_entity_value;
 use crate::widget_size::WidgetSize;
 
@@ -121,6 +122,20 @@ pub fn view(
 
     let ring = pulse_border(p, state.pulse.value());
 
+    // Top of view fn, before rendering
+    let demo_data: Vec<f32> = (0..60)
+        .map(|i| {
+            let t = i as f32 / 60.0;
+            50.0 + 30.0 * (t * 6.0).sin() + (i as f32 * 7.0).sin() * 5.0
+        })
+        .collect();
+
+    let sparkline = crate::ui::components::sparkline::Sparkline::new(
+        demo_data,
+        iced::Color { a: 0.4, ..p.accent },
+    )
+    .view();
+
     let inner = column![
         title_text,
         space().height(widget_settings.widget_size.title_value_gap()),
@@ -131,6 +146,7 @@ pub fn view(
                 value_text.into()
             }
         },
+        sparkline,
         space().height(widget_settings.widget_size.value_detail_gap()),
         {
             if widget_settings.widget_size == WidgetSize::Small
@@ -141,11 +157,16 @@ pub fn view(
                 detail_line
             }
         },
-        status_line(p, connected),
+        // status_line(p, connected),
     ]
     .spacing(0)
     .width(Length::Fill)
     .height(Length::Fill);
+
+    // let inner = iced::widget::stack![
+    //     sparkline,
+    //     inner,
+    // ];
 
     components::card_with_border(inner.into(), p, ring)
 }
