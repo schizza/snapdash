@@ -1,6 +1,6 @@
 use crate::theme::{Palette, metric, text_size};
-use crate::ui::components;
 use crate::ui::components::button::ButtonType;
+use crate::ui::components::{self};
 use iced::Length;
 use iced::widget::{column, row};
 use iced::{Element, widget::text::IntoFragment};
@@ -31,6 +31,7 @@ where
 pub fn page_with_sections<'a, I>(
     title: impl IntoFragment<'a>,
     items: I,
+    scrollable: bool,
     p: Palette,
 ) -> Element<'a, Message>
 where
@@ -40,13 +41,68 @@ where
         .spacing(metric::GAP)
         .width(Length::Fill);
 
-    items
+    let items = items
         .into_iter()
         .fold(outer, |col, item| col.push(item))
-        .into()
+        .into();
+
+    if scrollable {
+        components::scrollable(items, p).into()
+    } else {
+        items
+    }
 }
 
-/// One row i a settings card: left side a label and optional
+/// Make settings page with scrollable content and non-scrollable bottom.
+///
+/// Scrollable items will be on the top of page
+/// Non scrollabele (fixed) items will be at the bottom page.
+///
+/// You should consider make non scrollable only buttons row or just
+/// few items of any of item_with_*
+pub fn page_with_scrollable_sections<'a, S, F>(
+    title: impl IntoFragment<'a>,
+    scrollable_items: S,
+    fixed_items: F,
+    p: Palette,
+) -> Element<'a, Message>
+where
+    S: IntoIterator<Item = Element<'a, Message>>,
+    F: IntoIterator<Item = Element<'a, Message>>,
+{
+    // prepare scrollable items as Element
+    let scrollable_col = column![]
+        .spacing(metric::GAP)
+        .width(Length::Fill)
+        .height(Length::Fill);
+    let mut scrollable_items: Element<'a, Message> = scrollable_items
+        .into_iter()
+        .fold(scrollable_col, |col, item| col.push(item))
+        .into();
+    scrollable_items = components::scrollable(scrollable_items, p)
+        .height(Length::Fill)
+        .into();
+
+    // prepare non scrolable items as Element
+    let non_scrollable_col = column![].width(Length::Fill).spacing(metric::GAP);
+    let non_scrollable_items: Element<'a, Message> = fixed_items
+        .into_iter()
+        .fold(non_scrollable_col, |col, item| col.push(item))
+        .into();
+
+    // page generation
+    column![
+        components::title(title, p),
+        scrollable_items,
+        non_scrollable_items,
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .spacing(metric::GAP)
+    .into()
+}
+
+/// One row in a settings card: left side a label and optional
 /// helper text, right side carry action widget.
 fn item<'a>(
     label: impl IntoFragment<'a>,
