@@ -8,7 +8,7 @@ use crate::ui::update_view;
 use crate::update::{self, InstallProgress, UpdateState};
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let latest = match &snap.update.latest_release {
         Some(release) => release.tag_name.to_string(),

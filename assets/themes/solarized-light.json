@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "name": "Solarized Light",
+  "author": "Ethan Schoonover (port)",
+  "appearance": "light",
+  "palette": {
+    "bg": "#eee8d5",
+    "card": "#fdf6e3",
+    "card_2": "#f5eeda",
+    "text_primary": "#073642",
+    "text_secondary": "#586e75",
+    "text_body": "#657b83",
+    "text_dim": "#93a1a1",
+    "text_disabled": "#b5b09a",
+    "border": "#93a1a140",
+    "border_hovered": "#839496",
+    "accent": "#268bd2",
+    "accent_dim": "#1a6fad",
+    "accent_tint": "#268bd21f",
+    "shadow": { "color": "#00000026", "offset_x": 0.0, "offset_y": 8.0, "blur_radius": 18.0 },
+    "danger": "#dc322f",
+    "success": "#859900"
+  }
+}

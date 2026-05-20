@@ -2,6 +2,7 @@ use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
 use crate::system_info::{SysinfoData, SystemInfo};
+use crate::theme::loader::{available_themes, resolve_theme};
 use crate::ui::platform::window_settings;
 use crate::ui::settings::*;
 use crate::update;
@@ -16,7 +17,7 @@ use iced::{Element, Task};
 
 use crate::config::{Config, WidgetPosition};
 use crate::ha::token::{self, TokenPresence};
-use crate::theme::ThemeKind;
+use crate::theme::{DEFAULT_THEME, ThemeDef, ThemeKind};
 
 use super::window::{EntityWindowState, WindowKind, WindowState, find_window_id};
 
@@ -37,7 +38,8 @@ pub enum FocusDirection {
 pub struct Snapdash {
     pub config: Config,
     pub token_presence: TokenPresence,
-    pub theme: ThemeKind,
+    pub theme: ThemeDef,
+    pub available_themes: Vec<ThemeDef>,
 
     pub ha: ha::HaState,
 
@@ -87,7 +89,7 @@ pub enum Message {
     },
     AnimationFrame(iced::time::Instant),
 
-    ThemeSelected(ThemeKind),
+    ThemeSelected(String),
     SaveConfig,
     ToggleWidget(String),
 
@@ -160,10 +162,18 @@ impl Default for Snapdash {
 
 impl Snapdash {
     pub fn new() -> Self {
+        let available_themes = available_themes();
+
+        let theme = resolve_theme(DEFAULT_THEME, &available_themes)
+            .or_else(|| available_themes.first())
+            .cloned()
+            .expect("at least bultin theme exists");
+
         Self {
             config: Config::default(),
             token_presence: TokenPresence::Unchecked,
-            theme: ThemeKind::default(),
+            theme,
+            available_themes,
             ha: ha::HaState::default(),
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
@@ -728,9 +738,19 @@ impl Snapdash {
                     Ok(cfg) => {
                         let mut tasks: Vec<Task<Message>> = Vec::new();
 
-                        self.theme = cfg.theme;
                         self.config = cfg;
                         crate::autostart::validate_state(self.config.autostart);
+
+                        // Resolve the persisted theme name against the catalog.
+                        // Falls back to first builtin theme if name is unknown
+                        if let Some(theme) =
+                            resolve_theme(&self.config.theme, &self.available_themes)
+                        {
+                            self.theme = theme.clone();
+                        } else {
+                            tracing::warn!(name = %self.config.theme, "unknown theme, using defualt");
+                            self.theme = self.available_themes[0].clone();
+                        }
 
                         self.rebuild_selected_widgets();
                         self.set_status("Config loaded", LogType::Info);
@@ -955,11 +975,19 @@ impl Snapdash {
                 }
             }
 
-            Message::ThemeSelected(t) => {
-                self.theme = t;
-                self.config.theme = t;
-
-                self.save_config()
+            Message::ThemeSelected(name) => {
+                if let Some(theme) = self
+                    .available_themes
+                    .iter()
+                    .find(|t| t.name == name)
+                    .cloned()
+                {
+                    self.theme = theme;
+                    self.config.theme = name;
+                    self.save_config()
+                } else {
+                    Task::none()
+                }
             }
 
             Message::SaveConfig => {
@@ -1201,7 +1229,7 @@ impl Snapdash {
     pub fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
         iced::theme::Style {
             background_color: iced::Color::TRANSPARENT,
-            text_color: self.theme.palette().text_primary,
+            text_color: self.theme.palette.text_primary,
         }
     }
 }

@@ -335,7 +335,7 @@ pub fn icon_button<'a>(
 
     p: Palette,
 ) -> Element<'a, Message> {
-    let size = text_size.unwrap_or(crate::theme::text_size::SMALL);
+    let size = text_size.unwrap_or(text_size::SMALL);
     let mut i = icon.text(p).size(size);
     if let Some(c) = color {
         i = i.color(c);

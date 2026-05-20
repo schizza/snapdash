@@ -6,7 +6,7 @@ use crate::theme::metric;
 use crate::ui::components::{self, active_sensor_section, sensors_section};
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let search: Element<Message> =
         components::mac_input("Search entities ...", &snap.entity_search_query, p)

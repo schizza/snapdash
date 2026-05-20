@@ -9,7 +9,7 @@ use crate::ui::icon;
 use crate::{helpers, logger};
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let size = logger::get_log_size().unwrap_or(0);
     let log_size_helper = format!(
