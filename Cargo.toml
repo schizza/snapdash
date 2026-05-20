@@ -92,6 +92,9 @@ keyring = { version = "3.6.3", features = [
     "crypto-rust",
 ] }
 
+[dev-dependencies]
+tempfile = "3.27.0"
+
 [patch.crates-io]
 iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }
 iced_winit = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }
