@@ -1233,7 +1233,7 @@ impl Snapdash {
     pub fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
         iced::theme::Style {
             background_color: iced::Color::TRANSPARENT,
-            text_color: self.theme.palette().text_primary,
+            text_color: self.theme.palette.text_primary,
         }
     }
 }

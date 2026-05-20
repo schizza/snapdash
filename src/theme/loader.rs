@@ -68,7 +68,7 @@ pub fn load_user_themes() -> Vec<ThemeDef> {
 }
 
 pub fn load_themes_from(dir: &std::path::Path) -> Vec<ThemeDef> {
-    let entries = match std::fs::read_dir(&dir) {
+    let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             // No themes dir yet — fine, user hasn't added any.

@@ -158,12 +158,11 @@ mod tests {
     #[test]
     fn rejects_malformed_palette() {
         // Missing required field (no "success") → parse error.
-        let json = format!(
-            r##"{{
+        let json = r##"{{
                    "name": "Broken",
                    "palette": {{ "bg": "#000000" }}
-               }}"##,
-        );
-        assert!(serde_json::from_str::<ThemeDef>(&json).is_err());
+               }}"##;
+
+        assert!(serde_json::from_str::<ThemeDef>(json).is_err());
     }
 }

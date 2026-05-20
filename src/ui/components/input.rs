@@ -3,7 +3,7 @@ use iced::widget::{pick_list, text_input};
 use iced::{Background, Border};
 
 use crate::app::Message;
-use crate::theme::{Palette, ThemeDef, ThemeKind, metric, text_size};
+use crate::theme::{Palette, ThemeDef, metric, text_size};
 
 /// text_input wrapper to sytle as mac input
 pub fn mac_input<'a>(
