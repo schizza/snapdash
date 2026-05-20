@@ -193,6 +193,24 @@ impl Snapdash {
         }
     }
 
+    fn fetch_system_info(&mut self) -> Task<Message> {
+        self.sys_info = None;
+        self.sys_data = None;
+        self.iced_sys_info = None;
+
+        Task::batch([
+            iced::system::information().map(Message::SysInfoFetched),
+            Task::perform(
+                async {
+                    tokio::task::spawn_blocking(SysinfoData::collect)
+                        .await
+                        .unwrap_or_default()
+                },
+                Message::SysExtrasFetched,
+            ),
+        ])
+    }
+
     fn rebuild_active_settings_sensors(&mut self) {
         self.active_settings_sensors = self
             .settings_sensors
@@ -446,23 +464,7 @@ impl Snapdash {
                 Task::none()
             }
 
-            Message::RefresSystemInfo => {
-                self.sys_info = None;
-                self.iced_sys_info = None;
-                self.sys_data = None;
-                // Same trigger as in OpenSettings — could refactor into helper
-                Task::batch([
-                    iced::system::information().map(Message::SysInfoFetched),
-                    Task::perform(
-                        async {
-                            tokio::task::spawn_blocking(SysinfoData::collect)
-                                .await
-                                .unwrap_or_default()
-                        },
-                        Message::SysExtrasFetched,
-                    ),
-                ])
-            }
+            Message::RefresSystemInfo => self.fetch_system_info(),
 
             Message::AutostartChanged(want) => {
                 let previous = self.config.autostart;
@@ -676,7 +678,7 @@ impl Snapdash {
 
                 // Refresh sysinfo page on selection
                 if matches!(page, SettingsPage::Sysinfo) {
-                    iced::system::information().map(Message::SysInfoFetched)
+                    self.fetch_system_info()
                 } else {
                     Task::none()
                 }
@@ -893,17 +895,7 @@ impl Snapdash {
                 }
 
                 let sysinfo_task = if self.sys_info.is_none() {
-                    let iced_part = iced::system::information().map(Message::SysInfoFetched);
-                    let extras_part = Task::perform(
-                        async {
-                            tokio::task::spawn_blocking(SysinfoData::collect)
-                                .await
-                                .unwrap_or_default()
-                        },
-                        Message::SysExtrasFetched,
-                    );
-
-                    Task::batch([iced_part, extras_part])
+                    self.fetch_system_info()
                 } else {
                     Task::none()
                 };
