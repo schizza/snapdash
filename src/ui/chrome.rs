@@ -17,7 +17,7 @@ pub fn window_content<'a>(
         WindowKind::Settings => crate::ui::settings::view(app, id),
         WindowKind::Entity { .. } => crate::ui::entity_window::view(
             &win.entity,
-            app.theme.palette(),
+            app.theme.palette,
             app.ha.connected,
             app.update.is_available(),
             app.config.widget_settings,
@@ -43,7 +43,7 @@ pub fn with_gear_overlay<'a>(
         return inner;
     }
 
-    let p = app.theme.palette();
+    let p = app.theme.palette;
 
     let gear_button = iced::widget::button(Icon::Gear.text(p))
         .padding(8)

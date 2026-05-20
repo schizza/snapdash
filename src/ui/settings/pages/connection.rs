@@ -7,7 +7,7 @@ use crate::ui::components::{self, ButtonVisual, settings_components};
 use crate::ui::icon::Icon;
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let token_item = match &snap.token_presence {
         TokenPresence::Missing => settings_components::item_with_input(

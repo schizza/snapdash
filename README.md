@@ -35,6 +35,7 @@ SnapDash is designed to run quietly in the background without leaks, lag, or sur
 - **Real-time** updates via Home Assistant WebSocket API
 - **Frameless widgets** - pin individual sensors as floating macOS-style cards
 - **Native look** - Mac Light / Mac Dark themes, smooth pulse animations on state change
+- **Custom themes** - drop a JSON file in your themes folder to fully recolor the UI; share or download themes like Dracula, Nord, Catppuccin
 - **Secure token storage** - credentials lives in OS keychain (macOD Keychain / Windows Credential Manager / Linux Secret Service), never in plain text
 - **Cross-platform** - macOS, Windows, Linux
 - **Lightweight** - low CPU / memory footprint, designed to run 24/7 in background
@@ -140,6 +141,90 @@ If the config is corrupted, Snapdash falls back to defaults and writes a fresh f
 | **Windows** | `%APPDATA%\dev.snapdash.Snapdash\config.json` | `%APPDATA%\dev.snapdash.Snapdash\debug.log` |
 | **Linux** | `~/.config/snapdash/config.json` | `~/.local/share/snapdash/debug.log` |
 
+## Custom themes
+
+Beyond the built-in **Mac Light** and **Mac Dark**, Snapdash loads any
+JSON theme you drop into its `themes/` folder. Write your own, or grab
+a ready-made one (Dracula, Nord, Catppuccin, …) and place the file in:
+
+| OS | Themes folder |
+| --- | --- |
+| **macOS** | `~/Library/Application Support/dev.snapdash.Snapdash/themes/` |
+| **Windows** | `%APPDATA%\dev.snapdash.Snapdash\themes\` |
+| **Linux** | `~/.config/snapdash/themes/` |
+
+The folder is scanned at startup; every valid `*.json` shows up in
+**Settings → Appearance → Theme**. A malformed theme is skipped (with a
+warning in the log) — it never blocks the others or crashes the picker.
+
+### Theme file structure
+
+A theme is a single self-contained JSON file. Colors are hex strings,
+either `#rrggbb` (opaque) or `#rrggbbaa` (with alpha):
+
+```json
+{
+  "schema": 1,
+  "name": "Dracula",
+  "author": "Zeno Rocha (port)",
+  "appearance": "dark",
+  "palette": {
+    "bg": "#1e1f29",
+    "card": "#282a36",
+    "card_2": "#21222c",
+    "text_primary": "#f8f8f2",
+    "text_secondary": "#e2e2dc",
+    "text_body": "#f8f8f2",
+    "text_dim": "#6272a4",
+    "text_disabled": "#44475a",
+    "border": "#44475a80",
+    "border_hovered": "#6272a4",
+    "accent": "#bd93f9",
+    "accent_dim": "#a679e0",
+    "accent_tint": "#bd93f926",
+    "shadow": { "color": "#00000059", "offset_x": 0.0, "offset_y": 10.0, "blur_radius": 22.0 },
+    "danger": "#ff5555",
+    "success": "#50fa7b"
+  }
+}
+```
+
+**Top-level fields**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `schema` | no (default `1`) | Theme format version — for forward compatibility |
+| `name` | **yes** | Display name shown in the theme picker |
+| `author` | no | Credited as "Name — by Author" in the picker |
+| `appearance` | no (default `dark`) | `"light"` or `"dark"` — hint for grouping / OS-mode matching |
+| `palette` | **yes** | The color set (all fields below are required) |
+
+**Palette fields**
+
+| Field | Used for |
+| --- | --- |
+| `bg` | Window / surface background behind cards |
+| `card` | Primary card background |
+| `card_2` | Secondary / nested card background |
+| `text_primary` | Headings |
+| `text_secondary` | Subheadings, labels |
+| `text_body` | Normal body text |
+| `text_dim` | Placeholders, hints, captions |
+| `text_disabled` | Disabled controls |
+| `border` | Default borders |
+| `border_hovered` | Borders on hover |
+| `accent` | Primary accent (selection, active state, links) |
+| `accent_dim` | Dimmed accent variant |
+| `accent_tint` | Very subtle accent fill (use low alpha) |
+| `shadow` | Drop shadow: `{ color, offset_x, offset_y, blur_radius }` |
+| `danger` | Errors, destructive actions |
+| `success` | Connected / OK states |
+
+Ready-made examples live in [`assets/themes/`](assets/themes/) — copy any
+of them into your themes folder as a starting point, then tweak the
+colors. Changing the selected theme in Settings applies instantly; no
+restart needed.
+
 ## Troubleshooting
 
 **Settings window doesn't open**
@@ -162,8 +247,11 @@ On macOS/Windows the token only lives in the keychain. To reset: in Settings, cl
 - [X] Secure token storage in OS keychain
 - [X] Real-time state updates with pulse animations
 - [X] Multi-widget configuration via Settings
-- [X] Local history & 24h sparkline charts
-- [ ] System tray menu & autostart
+- [X] Custom JSON themes (downloadable / user-authored)
+- [X] Cross-platform autostart
+- [X] In-app auto-update
+- [ ] Local history & 24h sparkline charts
+- [ ] System tray menu
 - [ ] Plugin API for non-HA data sources
 - [ ] Linux-specific window hacks (XShape rounded corners)
 - [ ] Code-signed releases (macOS notarization, Windows signing)

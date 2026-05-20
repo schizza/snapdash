@@ -9,7 +9,7 @@ use crate::ui::icon::Icon;
 use crate::update;
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     // Hero
     let hero = column![

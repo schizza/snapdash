@@ -7,7 +7,7 @@ use crate::ui::components;
 use crate::ui::icon::Icon;
 
 pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let title_text = match &snap.update.latest_release {
         Some(r) => format!("Update to {}", r.tag_name),
@@ -49,9 +49,9 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
     )
     .into();
 
-    let md_theme: iced::Theme = match snap.theme {
-        crate::theme::ThemeKind::MacLight => iced::Theme::Light,
-        crate::theme::ThemeKind::MacDark => iced::Theme::Dark,
+    let md_theme: iced::Theme = match snap.theme.appearance {
+        crate::theme::Appearance::Light => iced::Theme::Light,
+        crate::theme::Appearance::Dark => iced::Theme::Dark,
     };
 
     let base_md_style = markdown::Style::from_palette(md_theme.palette());
