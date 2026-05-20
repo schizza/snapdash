@@ -1,4 +1,6 @@
 //! Simple human-readable size
+
+use std::time::Duration;
 pub fn humanize_bytes(n: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
@@ -64,4 +66,18 @@ pub fn humanize_magnitude(raw: &str) -> String {
     };
 
     format!("{} {}{}", display, prefix, unit)
+}
+
+pub fn humanize_duration(d: Duration) -> String {
+    let total = d.as_secs();
+    let days = total / 86400;
+    let hours = (total % 86400) / 3600;
+    let minutes = (total % 3600) / 60;
+    if days > 0 {
+        format!("{days}d {hours}h {minutes}m")
+    } else if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    }
 }
