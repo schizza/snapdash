@@ -2,7 +2,7 @@ use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
 use crate::system_info::{SysinfoData, SystemInfo};
-use crate::theme::loader::reslove_theme;
+use crate::theme::loader::{available_themes, resolve_theme};
 use crate::ui::platform::window_settings;
 use crate::ui::settings::*;
 use crate::update;
@@ -17,7 +17,7 @@ use iced::{Element, Task};
 
 use crate::config::{Config, WidgetPosition};
 use crate::ha::token::{self, TokenPresence};
-use crate::theme::{ThemeDef, ThemeKind, builtin_themes, load_user_themes};
+use crate::theme::{DEFAULT_THEME, ThemeDef, ThemeKind};
 
 use super::window::{EntityWindowState, WindowKind, WindowState, find_window_id};
 
@@ -162,16 +162,12 @@ impl Default for Snapdash {
 
 impl Snapdash {
     pub fn new() -> Self {
-        let available_themes = {
-            let mut v = builtin_themes();
-            v.extend(load_user_themes());
-            v
-        };
+        let available_themes = available_themes();
 
-        let theme = available_themes
-            .first()
+        let theme = resolve_theme(DEFAULT_THEME, &available_themes)
+            .or_else(|| available_themes.first())
             .cloned()
-            .expect("at least builtin themes exist");
+            .expect("at least bultin theme exists");
 
         Self {
             config: Config::default(),
@@ -748,7 +744,7 @@ impl Snapdash {
                         // Resolve the persisted theme name against the catalog.
                         // Falls back to first builtin theme if name is unknown
                         if let Some(theme) =
-                            reslove_theme(&self.config.theme, &self.available_themes)
+                            resolve_theme(&self.config.theme, &self.available_themes)
                         {
                             self.theme = theme.clone();
                         } else {

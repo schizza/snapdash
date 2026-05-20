@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use anyhow::{Context, Result};
 
+use crate::theme::DEFAULT_THEME;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub ha_url: String,
@@ -113,5 +115,5 @@ impl Config {
 }
 
 fn default_theme_name() -> String {
-    "Mac Dark".to_string()
+    DEFAULT_THEME.to_string()
 }

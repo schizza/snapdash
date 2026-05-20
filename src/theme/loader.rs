@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 
 use directories::ProjectDirs;
 
@@ -35,11 +35,36 @@ pub fn builtin_themes() -> Vec<ThemeDef> {
     ]
 }
 
+/// The full theme catalog: builtins first, then user themes, deduped
+/// by name. Builtins win over same-named user files. Does filesystem
+/// IO (scans the themes dir) — call once at startup.
+pub fn available_themes() -> Vec<ThemeDef> {
+    merge_unique(builtin_themes(), load_user_themes())
+}
+
+/// Merges two theme lists keeping the first occurrence of each name,
+/// so name-based lookup (resolve_theme) stays deterministic. Split out
+/// from available_themes() so the dedup rule is unit-testable without
+/// touching the filesystem.
+fn merge_unique(first: Vec<ThemeDef>, second: Vec<ThemeDef>) -> Vec<ThemeDef> {
+    let mut seen: HashSet<String> = first.iter().map(|t| t.name.clone()).collect();
+    let mut out = first;
+
+    for theme in second {
+        if seen.insert(theme.name.clone()) {
+            out.push(theme);
+        } else {
+            tracing::warn!(name = %theme.name, "duplicate theme name — skipping");
+        }
+    }
+    out
+}
+
 /// Resolves a stored theme name against the available catalog.
 /// Falls back through legacy ThemeKind enum names ("MacDark") for
 /// configs written before themes were named. Returns None if nothing
 /// matches — caller picks a default.
-pub fn reslove_theme<'a>(name: &str, available: &'a [ThemeDef]) -> Option<&'a ThemeDef> {
+pub fn resolve_theme<'a>(name: &str, available: &'a [ThemeDef]) -> Option<&'a ThemeDef> {
     if let Some(t) = available.iter().find(|t| t.name == name) {
         return Some(t);
     }
