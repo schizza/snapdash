@@ -4,6 +4,7 @@ pub mod config;
 pub mod ha;
 pub mod helpers;
 pub mod logger;
+pub mod system_info;
 pub mod theme;
 pub mod ui;
 pub mod update;

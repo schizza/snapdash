@@ -15,6 +15,7 @@ pub enum SettingsPage {
     Sensors,
     Updates,
     Advanced,
+    Sysinfo,
 }
 
 impl SettingsPage {
@@ -25,6 +26,7 @@ impl SettingsPage {
         Self::Sensors,
         Self::Updates,
         Self::Advanced,
+        Self::Sysinfo,
     ];
 
     pub fn label(self) -> &'static str {
@@ -35,6 +37,7 @@ impl SettingsPage {
             Self::Sensors => "Sensors",
             Self::Updates => "Updates",
             Self::Advanced => "Advanced",
+            Self::Sysinfo => "System information",
         }
     }
 }
@@ -53,6 +56,7 @@ pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
         SettingsPage::Sensors => pages::sensors::view(snap),
         SettingsPage::Updates => pages::updates::view(snap),
         SettingsPage::Advanced => pages::advanced::view(snap),
+        SettingsPage::Sysinfo => pages::sysinfo::view(snap, p),
     };
 
     let body: Element<Message> = iced::widget::row![

@@ -65,6 +65,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
                 p,
             ),
         ],
+        false,
         p,
     )
 }

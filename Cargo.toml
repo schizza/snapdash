@@ -34,10 +34,17 @@ diagnostics = []
 anyhow = "1.0.102"
 auto-launch = "0.6.0"
 chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
-iced = { version = "0.14.0", features = ["wgpu", "tokio", "markdown"] }
+iced = { version = "0.14.0", features = [
+    "wgpu",
+    "tokio",
+    "markdown",
+    "sysinfo",
+] }
+iced_winit = { version = "0.14.0", features = ["sysinfo"] }
 directories = "6.0.0"
 thiserror = "2.0.18"
 
+sysinfo = "0.38.4"
 reqwest = { version = "0.13.2", default-features = false, features = [
     "json",
     "rustls",
