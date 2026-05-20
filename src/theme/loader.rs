@@ -35,6 +35,24 @@ pub fn builtin_themes() -> Vec<ThemeDef> {
     ]
 }
 
+/// Resolves a stored theme name against the available catalog.
+/// Falls back through legacy ThemeKind enum names ("MacDark") for
+/// configs written before themes were named. Returns None if nothing
+/// matches — caller picks a default.
+pub fn reslove_theme<'a>(name: &str, available: &'a [ThemeDef]) -> Option<&'a ThemeDef> {
+    if let Some(t) = available.iter().find(|t| t.name == name) {
+        return Some(t);
+    }
+    // Legacy migration: old config stores the ThemeKind enum variant.
+    let migrated = match name {
+        "MacDark" => "Mac Dark",
+        "MacLight" => "Mac Light",
+        _ => return None,
+    };
+
+    available.iter().find(|t| t.name == migrated)
+}
+
 /// Loads all valid `.json` themes from the themes directory. Malformed
 /// files (bad JSON, missing fields, invalid hex) are logged and
 /// skipped — one broken theme never blocks the rest or the picker.

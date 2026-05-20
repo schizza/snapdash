@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "name": "Nord",
+  "author": "Arctic Ice Studio (port)",
+  "appearance": "dark",
+  "palette": {
+    "bg": "#2e3440",
+    "card": "#3b4252",
+    "card_2": "#343a46",
+    "text_primary": "#eceff4",
+    "text_secondary": "#d8dee9",
+    "text_body": "#e5e9f0",
+    "text_dim": "#7b88a1",
+    "text_disabled": "#4c566a",
+    "border": "#4c566a80",
+    "border_hovered": "#7b88a1",
+    "accent": "#88c0d0",
+    "accent_dim": "#6fa8b8",
+    "accent_tint": "#88c0d026",
+    "shadow": { "color": "#0a0e1466", "offset_x": 0.0, "offset_y": 10.0, "blur_radius": 22.0 },
+    "danger": "#bf616a",
+    "success": "#a3be8c"
+  }
+}

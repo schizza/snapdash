@@ -47,7 +47,7 @@ mod pages;
 mod sidebar;
 
 pub fn view(snap: &Snapdash, id: iced::window::Id) -> Element<'_, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let content: Element<Message> = match snap.settings_page {
         SettingsPage::General => pages::general::view(snap),

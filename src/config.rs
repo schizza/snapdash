@@ -5,13 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use anyhow::{Context, Result};
 
-use crate::theme::ThemeKind;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub ha_url: String,
     pub ha_token_present: bool,
-    pub theme: ThemeKind,
+    #[serde(default = "default_theme_name")]
+    pub theme: String,
     #[serde(default)]
     pub debug_overlay: bool,
     #[serde(default)]
@@ -44,7 +43,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             ha_url: "http://localhost:8123".into(),
-            theme: ThemeKind::default(),
+            theme: "Mac Dark".into(),
             ha_token_present: false,
             autostart: false,
             debug_overlay: false,
@@ -111,4 +110,8 @@ impl Config {
 
         Ok(())
     }
+}
+
+fn default_theme_name() -> String {
+    "Mac Dark".to_string()
 }

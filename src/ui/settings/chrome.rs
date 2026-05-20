@@ -13,7 +13,7 @@ use crate::ui::icon::Icon;
 use crate::ui::update_view;
 
 pub fn title_bar<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let update_badge: Element<Message> = if snap.update.is_available() {
         mouse_area(components::badge_with_icon(
@@ -48,7 +48,7 @@ pub fn title_bar<'a>(snap: &'a Snapdash, id: window::Id) -> Element<'a, Message>
 }
 
 pub fn footer<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let status: Element<Message> = if !snap.status.is_empty() {
         components::dimmed(snap.status.clone(), p).into()

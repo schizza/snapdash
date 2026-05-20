@@ -66,6 +66,23 @@ impl ThemeDef {
     }
 }
 
+impl std::fmt::Display for ThemeDef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label())
+    }
+}
+
+// Identity = name. Two themes with the same name are "the same" for
+// picker selection; we deliberately don't compare palettes (would
+// require Palette: PartialEq and isn't the picker's notion of equality).
+impl PartialEq for ThemeDef {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for ThemeDef {}
+
 //
 // TESTS
 //
