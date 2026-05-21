@@ -94,10 +94,5 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         p,
     );
 
-    page_with_sections(
-        "General",
-        [in_line_links, stats.into(), behav, actions],
-        false,
-        p,
-    )
+    page_with_sections("General", [in_line_links, stats, behav, actions], false, p)
 }
