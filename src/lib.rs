@@ -25,6 +25,11 @@ const INTER_VARIABLE: &[u8] = include_bytes!("../assets/fonts/InterVariable.ttf"
 /// and as outlines on macOS/Linux.
 pub const LUCIDE_FONT: &[u8] = include_bytes!("../assets/fonts/lucide.ttf");
 
+pub const HOMEPAGE_URL: &str = "https://snapdash.rs";
+pub const DOCS_URL: &str = "https://github.com/schizza/snapdash#readme";
+pub const ISSUES_URL: &str = "https://github.com/schizza/snapdash/issues";
+pub const REPO_URL: &str = "https://github.com/schizza/snapdash";
+
 /// Build and run the Snapdash daemon.
 ///
 /// On Linux we install a custom `.style()` that clears the surface to
