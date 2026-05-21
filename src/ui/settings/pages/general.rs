@@ -1,23 +1,23 @@
-use iced::widget::column;
-use iced::{Element, Length};
+use iced::Element;
 
 use crate::app::{Message, Snapdash};
-use crate::theme::metric;
-use crate::ui::components::settings_components::item_with_status;
-use crate::ui::components::{self, settings_components};
+use crate::ui::components::settings_components::{item_with_status, page_with_sections};
+use crate::ui::components::{self, inline_links, settings_components};
 use crate::ui::icon::Icon;
-use crate::update;
+use crate::{DOCS_URL, HOMEPAGE_URL, ISSUES_URL};
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let p = snap.theme.palette;
 
-    // Hero
-    let hero = column![
-        components::title("Snapdash", p),
-        components::label(format!("Version {}", update::CURRENT_VERSION), p)
-    ]
-    .spacing(4);
-
+    let in_line_links = inline_links(
+        [
+            ("Homepage", HOMEPAGE_URL),
+            ("Docs", DOCS_URL),
+            ("Issues", ISSUES_URL),
+        ],
+        p,
+    );
+    let in_line_links = settings_components::section([in_line_links], p);
     // Stats grid
     let ha_status_text = if snap.ha.connected {
         format!("Connected to {}", snap.config.ha_url)
@@ -94,15 +94,5 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         p,
     );
 
-    column![
-        components::title("General", p),
-        hero,
-        iced::widget::space().height(metric::PAD),
-        stats,
-        behav,
-        actions,
-    ]
-    .spacing(metric::PAD)
-    .width(Length::Fill)
-    .into()
+    page_with_sections("General", [in_line_links, stats, behav, actions], false, p)
 }

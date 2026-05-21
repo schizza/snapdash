@@ -79,15 +79,23 @@ pub fn footer<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     .align_y(iced::Alignment::Center)
     .into();
 
-    iced::widget::row![
-        status,
-        iced::widget::space().width(iced::Length::Fill),
-        save_btn,
-        quit_btn,
-        iced::widget::space().width(metric::GAP),
-        version,
+    iced::widget::column![
+        iced::widget::row![
+            iced::widget::space().width(iced::Length::Fill),
+            save_btn,
+            quit_btn,
+        ]
+        .spacing(metric::GAP)
+        .align_y(iced::Alignment::Center),
+        iced::widget::row![
+            status,
+            iced::widget::space().width(iced::Length::Fill),
+            version,
+        ]
+        .spacing(metric::GAP)
+        .align_y(iced::Alignment::Center)
     ]
     .spacing(metric::GAP)
-    .align_y(iced::Alignment::Center)
+    .align_x(iced::Alignment::End)
     .into()
 }

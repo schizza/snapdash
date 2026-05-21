@@ -3,7 +3,7 @@ use iced::widget::{column, container, text};
 use iced::{Background, Border, Element, Length};
 
 use crate::app::Message;
-use crate::theme::{Palette, text_size};
+use crate::theme::{Palette, metric, text_size};
 use crate::ui::icon::Icon;
 use crate::ui::theme::MessageType;
 
@@ -166,4 +166,41 @@ pub fn error_message<'a>(content: impl IntoFragment<'a>, p: Palette) -> Element<
 
 pub fn success_message<'a>(content: impl IntoFragment<'a>, p: Palette) -> Element<'a, Message> {
     message(content, MessageType::Success, (0.12, 0.4), p)
+}
+
+pub fn link<'a>(link: &'a str, url: &'static str, p: Palette) -> Element<'a, Message> {
+    iced::widget::mouse_area(body(link, p))
+        .on_press(Message::OpenUrl(url.to_string()))
+        .interaction(iced::mouse::Interaction::Pointer)
+        .into()
+}
+
+pub fn inline_links<'a, I>(items: I, p: Palette) -> Element<'a, Message>
+where
+    I: IntoIterator<Item = (&'a str, &'static str)>,
+{
+    let row = iced::widget::row![]
+        .spacing(metric::GAP)
+        .align_y(iced::Alignment::Center);
+
+    let item_row = items
+        .into_iter()
+        .enumerate()
+        .fold(row, |mut row, (i, (l, u))| {
+            if i > 0 {
+                row = row.push(separator(p)); // separator before all but the first
+            }
+            row.push(link(l, u, p))
+        });
+
+    item_row.into()
+}
+
+fn separator<'a>(p: Palette) -> Element<'a, Message> {
+    text("•")
+        .size(text_size::LARGE)
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(p.text_dim),
+        })
+        .into()
 }
