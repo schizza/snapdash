@@ -15,6 +15,6 @@ pub use input::{mac_input, picker, themepicker, toggler};
 pub use scrollable::scrollable;
 pub use sensors::{active_sensor_section, sensors_section, status_dot};
 pub use text::{
-    badge, badge_with_icon, body, body_with_helper, dimmed, error_message, helper, label, section,
-    success_message, title, tooltip_message,
+    badge, badge_with_icon, body, body_with_helper, dimmed, error_message, helper, inline_links,
+    label, link, section, success_message, title, tooltip_message,
 };

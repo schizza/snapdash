@@ -1,3 +1,4 @@
+use crate::theme::{hex_color, shadow};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -18,28 +19,43 @@ impl fmt::Display for ThemeKind {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Palette {
+    #[serde(with = "hex_color")]
     pub bg: iced::Color,
+    #[serde(with = "hex_color")]
     pub card: iced::Color,
+    #[serde(with = "hex_color")]
     pub card_2: iced::Color,
-
-    pub text_primary: iced::Color,   // main headings
+    #[serde(with = "hex_color")]
+    pub text_primary: iced::Color, // main headings
+    #[serde(with = "hex_color")]
     pub text_secondary: iced::Color, // subhedings, labels
-    pub text_body: iced::Color,      // normal text
-    pub text_dim: iced::Color,       // placeholder, hint
+    #[serde(with = "hex_color")]
+    pub text_body: iced::Color, // normal text
+    #[serde(with = "hex_color")]
+    pub text_dim: iced::Color, // placeholder, hint
+    #[serde(with = "hex_color")]
     pub text_disabled: iced::Color,
 
+    #[serde(with = "hex_color")]
     pub border: iced::Color,
+    #[serde(with = "hex_color")]
     pub border_hovered: iced::Color,
 
+    #[serde(with = "hex_color")]
     pub accent: iced::Color,
+    #[serde(with = "hex_color")]
     pub accent_dim: iced::Color,
+    #[serde(with = "hex_color")]
     pub accent_tint: iced::Color,
 
+    #[serde(with = "shadow")]
     pub shadow: iced::Shadow,
 
+    #[serde(with = "hex_color")]
     pub danger: iced::Color,
+    #[serde(with = "hex_color")]
     pub success: iced::Color,
 }
 
@@ -120,4 +136,48 @@ pub mod text_size {
     pub const XSMALL: f32 = 10.0;
     pub const LARGE: f32 = 15.0;
     pub const XLARGE: f32 = 22.0;
+}
+
+//
+//   TESTS
+//
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn palette_roundtrips_through_json() {
+        let original = ThemeKind::MacDark.palette();
+        let json = serde_json::to_string_pretty(&original).expect("serialize");
+        let restored: Palette = serde_json::from_str(&json).expect("deserialize");
+
+        // Compare a few key fields (Palette isn't PartialEq — compare components)
+        assert_eq!(original.accent.into_rgba8(), restored.accent.into_rgba8());
+        assert_eq!(original.bg.into_rgba8(), restored.bg.into_rgba8());
+        assert_eq!(original.shadow.blur_radius, restored.shadow.blur_radius);
+    }
+
+    #[test]
+    fn parses_opaque_and_alpha_hex() {
+        let json = r##"{
+            "bg": "#1e1e2e",
+            "card": "#282a36",
+            "card_2": "#21222c",
+            "text_primary": "#f8f8f2",
+            "text_secondary": "#e0e0d0",
+            "text_body": "#cdd6f4",
+            "text_dim": "#6272a4",
+            "text_disabled": "#45475a",
+            "border": "#44475a80",
+            "border_hovered": "#44475a",
+            "accent": "#bd93f9",
+            "accent_dim": "#a679e0",
+            "accent_tint": "#bd93f924",
+            "shadow": { "color": "#00000040", "offset_x": 0.0, "offset_y": 10.0, "blur_radius": 20.0 },
+            "danger": "#ff5555",
+            "success": "#50fa7b"
+        }"##;
+        let p: Palette = serde_json::from_str(json).expect("parse");
+        assert_eq!(p.accent.into_rgba8(), [189, 147, 249, 255]);
+    }
 }

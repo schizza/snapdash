@@ -1,12 +1,12 @@
 [package]
 name = "snapdash"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2024"
 authors = ["Lukáš Svoboda <opensource@schizza.cz>"]
 license = "Apache-2.0"
 description = "A pluggable desktop widget system - Home Assistant today, anything tomorrow."
 repository = "https://github.com/schizza/snapdash"
-homepage = "https://snapdash.schizza.cz"
+homepage = "https://snapdash.rs"
 documentation = "https://github.com/schizza/snapdash#readme"
 readme = "README.md"
 keywords = ["widget", "dashboard", "home-assistant", "desktop", "gui"]
@@ -34,11 +34,18 @@ diagnostics = []
 anyhow = "1.0.102"
 auto-launch = "0.6.0"
 chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
-iced = { version = "0.14.0", features = ["wgpu", "tokio", "markdown"] }
+iced = { version = "0.14.0", features = [
+    "wgpu",
+    "tokio",
+    "markdown",
+    "sysinfo",
+] }
+iced_winit = { version = "0.14.0", features = ["sysinfo"] }
 directories = "6.0.0"
 thiserror = "2.0.18"
 
-reqwest = { version = "0.13.2", default-features = false, features = [
+sysinfo = "0.38.4"
+reqwest = { version = "0.13.3", default-features = false, features = [
     "json",
     "rustls",
     "http2",
@@ -46,7 +53,7 @@ reqwest = { version = "0.13.2", default-features = false, features = [
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = { version = "1.52.1", features = [
+tokio = { version = "1.52.3", features = [
     "macros",
     "rt-multi-thread",
     "time",
@@ -61,7 +68,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tracing-appender = "0.2.5"
 rand = "0.10.1"
-open = "5.3.4"
+open = "5.3.5"
 self_update = { version = "0.44.0", features = [
     "rustls",
     "archive-tar",
@@ -70,7 +77,7 @@ self_update = { version = "0.44.0", features = [
 sha2 = "0.11.0"
 tempfile = "3.27.0"
 flate2 = "1.1.9"
-tar = "0.4.45"
+tar = "0.4.46"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -84,6 +91,9 @@ keyring = { version = "3.6.3", features = [
     "sync-secret-service",
     "crypto-rust",
 ] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
 
 [patch.crates-io]
 iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }

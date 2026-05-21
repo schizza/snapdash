@@ -1,6 +1,8 @@
 use crate::ha::types::HaError;
 use crate::ha::{EntityState, HaConnectionConfig, HaEvent};
 use crate::logger::LogType;
+use crate::system_info::{SysinfoData, SystemInfo};
+use crate::theme::loader::{available_themes, resolve_theme};
 use crate::ui::platform::window_settings;
 use crate::ui::settings::*;
 use crate::update;
@@ -9,12 +11,13 @@ use crate::{ha, logger};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use iced::system::Information;
 use iced::window;
 use iced::{Element, Task};
 
 use crate::config::{Config, WidgetPosition};
 use crate::ha::token::{self, TokenPresence};
-use crate::theme::ThemeKind;
+use crate::theme::{DEFAULT_THEME, ThemeDef, ThemeKind};
 
 use super::window::{EntityWindowState, WindowKind, WindowState, find_window_id};
 
@@ -35,7 +38,8 @@ pub enum FocusDirection {
 pub struct Snapdash {
     pub config: Config,
     pub token_presence: TokenPresence,
-    pub theme: ThemeKind,
+    pub theme: ThemeDef,
+    pub available_themes: Vec<ThemeDef>,
 
     pub ha: ha::HaState,
 
@@ -61,6 +65,10 @@ pub struct Snapdash {
 
     pub config_save_in_flight: bool,
     pub config_save_pending: bool,
+
+    pub sys_data: Option<SysinfoData>,
+    pub sys_info: Option<SystemInfo>,
+    pub iced_sys_info: Option<iced::system::Information>,
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +89,7 @@ pub enum Message {
     },
     AnimationFrame(iced::time::Instant),
 
-    ThemeSelected(ThemeKind),
+    ThemeSelected(String),
     SaveConfig,
     ToggleWidget(String),
 
@@ -138,6 +146,12 @@ pub enum Message {
     AdaptiveFontChanged(bool),
     AdaptiveValueChanged(bool),
     ShowMeasurementInfoChanged(bool),
+
+    SysInfoFetched(Information),
+    SysExtrasFetched(SysinfoData),
+    RefresSystemInfo,
+    CopySystemInfo,
+    CopySystemInfoMd,
 }
 
 impl Default for Snapdash {
@@ -148,10 +162,18 @@ impl Default for Snapdash {
 
 impl Snapdash {
     pub fn new() -> Self {
+        let available_themes = available_themes();
+
+        let theme = resolve_theme(DEFAULT_THEME, &available_themes)
+            .or_else(|| available_themes.first())
+            .cloned()
+            .expect("at least bultin theme exists");
+
         Self {
             config: Config::default(),
             token_presence: TokenPresence::Unchecked,
-            theme: ThemeKind::default(),
+            theme,
+            available_themes,
             ha: ha::HaState::default(),
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
@@ -168,8 +190,37 @@ impl Snapdash {
             last_widget_move_at: None,
             config_save_in_flight: false,
             config_save_pending: false,
+            sys_info: None,
+            iced_sys_info: None,
+            sys_data: None,
         }
     }
+
+    fn try_combine_sysinfo(&mut self) {
+        if let (Some(iced), Some(extras)) = (&self.iced_sys_info, &self.sys_data) {
+            self.sys_info = Some(SystemInfo::from_parts(iced, extras));
+            tracing::info!("system info ready");
+        }
+    }
+
+    fn fetch_system_info(&mut self) -> Task<Message> {
+        self.sys_info = None;
+        self.sys_data = None;
+        self.iced_sys_info = None;
+
+        Task::batch([
+            iced::system::information().map(Message::SysInfoFetched),
+            Task::perform(
+                async {
+                    tokio::task::spawn_blocking(SysinfoData::collect)
+                        .await
+                        .unwrap_or_default()
+                },
+                Message::SysExtrasFetched,
+            ),
+        ])
+    }
+
     fn rebuild_active_settings_sensors(&mut self) {
         self.active_settings_sensors = self
             .settings_sensors
@@ -393,6 +444,38 @@ impl Snapdash {
         match message {
             Message::Noop => Task::none(),
 
+            Message::CopySystemInfo => {
+                if let Some(snapshoot) = &self.sys_info {
+                    let text = snapshoot.to_clipboard_string();
+                    self.set_status("System info copied", LogType::DoNotLog);
+                    return iced::clipboard::write(text);
+                }
+                Task::none()
+            }
+
+            Message::CopySystemInfoMd => {
+                if let Some(snapshoot) = &self.sys_info {
+                    let text = snapshoot.to_md_string();
+                    self.set_status("System info copied as Markdown", LogType::DoNotLog);
+                    return iced::clipboard::write(text);
+                }
+                Task::none()
+            }
+
+            Message::SysInfoFetched(i) => {
+                self.iced_sys_info = Some(i);
+                self.try_combine_sysinfo();
+                Task::none()
+            }
+
+            Message::SysExtrasFetched(data) => {
+                self.sys_data = Some(data);
+                self.try_combine_sysinfo();
+                Task::none()
+            }
+
+            Message::RefresSystemInfo => self.fetch_system_info(),
+
             Message::AutostartChanged(want) => {
                 let previous = self.config.autostart;
                 self.config.autostart = want;
@@ -602,7 +685,13 @@ impl Snapdash {
 
             Message::SettingsPageSelected(page) => {
                 self.settings_page = page;
-                Task::none()
+
+                // Refresh sysinfo page on selection
+                if matches!(page, SettingsPage::Sysinfo) {
+                    self.fetch_system_info()
+                } else {
+                    Task::none()
+                }
             }
 
             Message::SettingsSearchChanged(value) => {
@@ -649,18 +738,19 @@ impl Snapdash {
                     Ok(cfg) => {
                         let mut tasks: Vec<Task<Message>> = Vec::new();
 
-                        self.theme = cfg.theme;
                         self.config = cfg;
                         crate::autostart::validate_state(self.config.autostart);
 
-                        tasks.push(Task::perform(
-                            async {
-                                tokio::task::spawn_blocking(token::presence)
-                                    .await
-                                    .unwrap_or_else(|e| TokenPresence::AccessFailed(e.to_string()))
-                            },
-                            Message::HaTokenPresenceChecked,
-                        ));
+                        // Resolve the persisted theme name against the catalog.
+                        // Falls back to first builtin theme if name is unknown
+                        if let Some(theme) =
+                            resolve_theme(&self.config.theme, &self.available_themes)
+                        {
+                            self.theme = theme.clone();
+                        } else {
+                            tracing::warn!(name = %self.config.theme, "unknown theme, using defualt");
+                            self.theme = self.available_themes[0].clone();
+                        }
 
                         self.rebuild_selected_widgets();
                         self.set_status("Config loaded", LogType::Info);
@@ -676,10 +766,21 @@ impl Snapdash {
                             tasks.push(open_task);
                         }
 
+                        let key_chain_task = Task::perform(
+                            async {
+                                tokio::task::spawn_blocking(token::presence)
+                                    .await
+                                    .unwrap_or_else(|e| TokenPresence::AccessFailed(e.to_string()))
+                            },
+                            Message::HaTokenPresenceChecked,
+                        );
+
                         return if tasks.is_empty() {
                             Task::none()
                         } else {
-                            Task::batch(tasks)
+                            // Lazily create key-chain task. The task should be the last on boot
+                            // while it is blocking spawn.
+                            Task::batch(tasks).chain(key_chain_task)
                         };
                     }
                     Err(e) => {
@@ -734,6 +835,11 @@ impl Snapdash {
             }
 
             Message::WindowOpened { id, kind } => {
+                // Lazy-fetch system info once we have at least one window -
+                // the compositor (and therefore grapichs_adapter info).
+                // Graphics info is only available after the first windows open.
+                // If we trigger sys_info on the boot() the request races compositor init.
+
                 let mut entity = EntityWindowState::default();
 
                 if let WindowKind::Entity { entity_id } = &kind {
@@ -802,10 +908,17 @@ impl Snapdash {
             Message::OpenSettings => {
                 // if Settings window is opened, give focus
                 //
+
                 if let Some(settings_id) = find_window_id(&self.windows, WindowKind::Settings, None)
                 {
                     return iced::window::gain_focus::<Message>(settings_id);
                 }
+
+                let sysinfo_task = if self.sys_info.is_none() {
+                    self.fetch_system_info()
+                } else {
+                    Task::none()
+                };
 
                 // The platform helper adds a transparent shadow margin on
                 // Linux (where we render our own shader shadow) and is a
@@ -813,10 +926,12 @@ impl Snapdash {
                 // own shadow). See `ui::platform` module doc.
                 let settings = window_settings(iced::Size::new(920.0, 640.0), true);
                 let (id, task_id) = window::open(settings);
-                task_id.map(move |_| Message::WindowOpened {
-                    id,
-                    kind: WindowKind::Settings,
-                })
+                task_id
+                    .map(move |_| Message::WindowOpened {
+                        id,
+                        kind: WindowKind::Settings,
+                    })
+                    .chain(sysinfo_task)
             }
 
             Message::OpenEntity(entity_id) => {
@@ -860,11 +975,19 @@ impl Snapdash {
                 }
             }
 
-            Message::ThemeSelected(t) => {
-                self.theme = t;
-                self.config.theme = t;
-
-                self.save_config()
+            Message::ThemeSelected(name) => {
+                if let Some(theme) = self
+                    .available_themes
+                    .iter()
+                    .find(|t| t.name == name)
+                    .cloned()
+                {
+                    self.theme = theme;
+                    self.config.theme = name;
+                    self.save_config()
+                } else {
+                    Task::none()
+                }
             }
 
             Message::SaveConfig => {
@@ -1106,7 +1229,7 @@ impl Snapdash {
     pub fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
         iced::theme::Style {
             background_color: iced::Color::TRANSPARENT,
-            text_color: self.theme.palette().text_primary,
+            text_color: self.theme.palette.text_primary,
         }
     }
 }

@@ -1,11 +1,12 @@
 use iced::Element;
 
 use crate::app::{Message, Snapdash};
+use crate::theme::ThemeDef;
 use crate::ui::components::settings_components;
 use crate::widget_size::WidgetSize;
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     settings_components::page_with_sections(
         "Appearance",
@@ -15,9 +16,9 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
                 [settings_components::item_with_picker(
                     "Theme",
                     None,
-                    snap.theme_options.clone(),
-                    snap.theme,
-                    Message::ThemeSelected,
+                    snap.available_themes.clone(),
+                    snap.theme.clone(),
+                    |theme: ThemeDef| Message::ThemeSelected(theme.name),
                     p,
                 )],
                 p,
@@ -58,6 +59,7 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
                 p,
             ),
         ],
+        false,
         p,
     )
 }

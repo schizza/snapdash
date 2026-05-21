@@ -3,10 +3,10 @@ use iced::{Element, Length};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
-use crate::ui::components::{self, active_sensor_section, sensors_section};
+use crate::ui::components::{self, active_sensor_section, sensors_section, settings_components};
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let search: Element<Message> =
         components::mac_input("Search entities ...", &snap.entity_search_query, p)
@@ -45,8 +45,10 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         p,
     );
 
-    column![components::title(snap.settings_page.label(), p), body]
-        .width(Length::Fill)
-        .spacing(metric::GAP)
-        .into()
+    settings_components::page_with_sections(snap.settings_page.label(), [body], false, p)
+
+    // column![components::title(snap.settings_page.label(), p), body]
+    //     .width(Length::Fill)
+    //     .spacing(metric::GAP)
+    //     .into()
 }

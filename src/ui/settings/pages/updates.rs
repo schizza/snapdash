@@ -1,14 +1,14 @@
+use iced::Element;
 use iced::widget::{column, row};
-use iced::{Element, Length};
 
 use crate::app::{Message, Snapdash};
 use crate::theme::metric;
-use crate::ui::components::{self, error_message, success_message};
+use crate::ui::components::{self, error_message, settings_components, success_message};
 use crate::ui::update_view;
 use crate::update::{self, InstallProgress, UpdateState};
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let latest = match &snap.update.latest_release {
         Some(release) => release.tag_name.to_string(),
@@ -92,11 +92,5 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         body = body.push(iced::widget::space().height(metric::GAP));
     }
 
-    column![
-        components::title(snap.settings_page.label(), p),
-        components::subcard(body.into(), p)
-    ]
-    .spacing(metric::PAD)
-    .width(Length::Fill)
-    .into()
+    settings_components::page(snap.settings_page.label(), [body.into()], p)
 }

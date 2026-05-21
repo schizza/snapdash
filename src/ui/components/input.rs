@@ -3,7 +3,7 @@ use iced::widget::{pick_list, text_input};
 use iced::{Background, Border};
 
 use crate::app::Message;
-use crate::theme::{Palette, ThemeKind, metric, text_size};
+use crate::theme::{Palette, ThemeDef, metric, text_size};
 
 /// text_input wrapper to sytle as mac input
 pub fn mac_input<'a>(
@@ -102,11 +102,16 @@ where
 
 /// wrapper aroud pick_list
 pub fn themepicker(
-    options: Vec<ThemeKind>,
-    selected: ThemeKind,
+    options: Vec<ThemeDef>,
+    selected: ThemeDef,
     p: Palette,
-) -> pick_list::PickList<'static, ThemeKind, Vec<ThemeKind>, ThemeKind, Message> {
-    picker(options, selected, Message::ThemeSelected, p)
+) -> pick_list::PickList<'static, ThemeDef, Vec<ThemeDef>, ThemeDef, Message> {
+    picker(
+        options,
+        selected,
+        |theme: ThemeDef| Message::ThemeSelected(theme.name),
+        p,
+    )
 }
 
 pub fn toggler<'a, F, M>(is_checked: bool, on_toggle: F, p: Palette) -> iced::widget::Toggler<'a, M>

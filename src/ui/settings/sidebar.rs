@@ -8,7 +8,7 @@ use crate::theme::{Palette, metric, text_size};
 use super::SettingsPage;
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
-    let p = snap.theme.palette();
+    let p = snap.theme.palette;
 
     let mut nav = column![].spacing(2);
     for &page in SettingsPage::ALL {
