@@ -165,8 +165,29 @@ pub fn import_theme_file(source: &std::path::Path) -> Result<String, String> {
     Ok(theme.name)
 }
 
+/// Install a theme fetched from the gallery into the user themes
+/// directory. Unlike `import_theme_file` (which copies the original file
+/// bytes), this serializes the already-parsed `ThemeDef` back to JSON —
+/// the gallery hands us full defs, not a file on disk. Overwrites an
+/// existing same-named file, consistent with import.
+pub fn install_theme(theme: &ThemeDef) -> Result<String, String> {
+    let dir = themes_dir().ok_or_else(|| "Cannot resolve themes directory".to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create themes dir: {e}"))?;
+
+    let bytes =
+        serde_json::to_vec_pretty(theme).map_err(|e| format!("Cannot srialize theme: {e}"))?;
+
+    let filename = format!("{}.json", sanitize_filename(&theme.name));
+    let dest = dir.join(filename);
+
+    std::fs::write(&dest, &bytes).map_err(|e| format!("Cannot write theme: {e}"))?;
+    tracing::info!(name = %theme.name, path = %dest.display(), "installed theme from gallery");
+    Ok(theme.name.clone())
+}
+
 fn sanitize_filename(name: &str) -> String {
-    name.chars()
+    let slug = name
+        .chars()
         .map(|c| match c {
             'a'..='z' | '0'..='9' => c,
             'A'..='Z' => c.to_ascii_lowercase(),
@@ -175,8 +196,29 @@ fn sanitize_filename(name: &str) -> String {
         })
         .collect::<String>()
         .trim_matches('-')
-        .to_string()
+        .to_string();
+
+    let suffix = format!("{:08x}", fnv1a(name));
+
+    if slug.is_empty() {
+        format!("theme-{suffix}")
+    } else {
+        format!("{slug}-{suffix}")
+    }
 }
+
+/// FNV-1a 32-bit. Used only to disambiguate filename slugs — small and
+/// stable across runs/Rust versions (std's `DefaultHasher` is not
+/// guaranteed stable).
+fn fnv1a(s: &str) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in s.as_bytes() {
+        h ^= u32::from(*b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
 //
 // TESTS
 //
@@ -283,8 +325,8 @@ mod tests {
 
     #[test]
     fn sanitize_makes_safe_filenames() {
-        assert_eq!(sanitize_filename("Dracula"), "dracula");
-        assert_eq!(sanitize_filename("My Cool Theme"), "my-cool-theme");
-        assert_eq!(sanitize_filename("Solarized (Light)"), "solarized--light");
+        assert!(sanitize_filename("Dracula").starts_with("dracula"));
+        assert!(sanitize_filename("My Cool Theme").starts_with("my-cool-theme"));
+        assert!(sanitize_filename("Solarized (Light)").starts_with("solarized--light"));
     }
 }
