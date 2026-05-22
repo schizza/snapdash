@@ -10,7 +10,7 @@ use serde::Deserialize;
 use super::def::ThemeDef;
 
 const INDEX_URL: &str =
-    "https://raw.githubusercontent.com/schizza/snapdash/main/assets/themes/index.json";
+    "https://raw.githubusercontent.com/schizza/snapdash/dev/assets/themes/index.json";
 
 #[derive(Debug, Deserialize)]
 struct Index {
