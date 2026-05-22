@@ -40,6 +40,7 @@ pub struct Snapdash {
     pub token_presence: TokenPresence,
     pub theme: ThemeDef,
     pub available_themes: Vec<ThemeDef>,
+    pub theme_import_status: Option<Result<String, String>>,
 
     pub ha: ha::HaState,
 
@@ -90,6 +91,8 @@ pub enum Message {
     AnimationFrame(iced::time::Instant),
 
     ThemeSelected(String),
+    ImportTheme,
+    ThemeFilePicked(Option<std::path::PathBuf>),
     SaveConfig,
     ToggleWidget(String),
 
@@ -174,6 +177,7 @@ impl Snapdash {
             token_presence: TokenPresence::Unchecked,
             theme,
             available_themes,
+            theme_import_status: None,
             ha: ha::HaState::default(),
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
@@ -443,6 +447,41 @@ impl Snapdash {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Noop => Task::none(),
+
+            Message::ImportTheme => {
+                // Open native file picker.
+                // rfd returns FileHandle -> map to path
+
+                Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .add_filter("Theme", &["json"])
+                            .set_title("Import Snapdash theme")
+                            .pick_file()
+                            .await
+                            .map(|handle| handle.path().to_path_buf())
+                    },
+                    Message::ThemeFilePicked,
+                )
+            }
+
+            Message::ThemeFilePicked(None) => Task::none(),
+
+            Message::ThemeFilePicked(Some(path)) => {
+                match crate::theme::import_theme_file(&path) {
+                    Ok(name) => {
+                        // Re-scan
+                        self.available_themes = crate::theme::available_themes();
+                        self.theme_import_status = Some(Ok(format!("Imported `{name}`")));
+                        self.set_status(format!("Theme '{name}' imported"), LogType::Info);
+                    }
+                    Err(e) => {
+                        self.theme_import_status = Some(Err(e.clone()));
+                        self.set_status(format!("Theme import failed: {e}"), LogType::Error);
+                    }
+                }
+                Task::none()
+            }
 
             Message::CopySystemInfo => {
                 if let Some(snapshoot) = &self.sys_info {
