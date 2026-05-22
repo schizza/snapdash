@@ -18,6 +18,14 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
             p,
         ),
         settings_components::item_with_badge_button(
+            "Theme gallery",
+            Some("Browse and install themes published online."),
+            "Browse",
+            Some(crate::ui::icon::Icon::Download),
+            Some(Message::OpenThemeGallery),
+            p,
+        ),
+        settings_components::item_with_badge_button(
             "Import theme",
             Some("Add a theme from a JSON file."),
             "Import",

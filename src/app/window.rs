@@ -70,6 +70,7 @@ pub enum WindowKind {
     Settings,
     Entity { entity_id: String },
     ReleaseNotes,
+    ThemeGallery,
 }
 
 #[derive(Debug, Clone)]

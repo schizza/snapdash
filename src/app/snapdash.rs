@@ -34,6 +34,14 @@ pub enum FocusDirection {
     Previous,
 }
 
+#[derive(Debug, Clone)]
+pub enum GalleryState {
+    Idle,
+    Loading,
+    Loaded(Vec<ThemeDef>),
+    Failed(String),
+}
+
 #[derive(Debug)]
 pub struct Snapdash {
     pub config: Config,
@@ -41,6 +49,8 @@ pub struct Snapdash {
     pub theme: ThemeDef,
     pub available_themes: Vec<ThemeDef>,
     pub theme_import_status: Option<Result<String, String>>,
+    pub gallery: GalleryState,
+    pub gallery_status: Option<Result<String, String>>,
 
     pub ha: ha::HaState,
 
@@ -93,6 +103,9 @@ pub enum Message {
     ThemeSelected(String),
     ImportTheme,
     ThemeFilePicked(Option<std::path::PathBuf>),
+    OpenThemeGallery,
+    GalleryIndexFetched(Result<Vec<ThemeDef>, String>),
+    InstallGalleryTheme(ThemeDef),
     SaveConfig,
     ToggleWidget(String),
 
@@ -177,6 +190,8 @@ impl Snapdash {
             token_presence: TokenPresence::Unchecked,
             theme,
             available_themes,
+            gallery: GalleryState::Idle,
+            gallery_status: None,
             theme_import_status: None,
             ha: ha::HaState::default(),
             status: "-".into(),
@@ -478,6 +493,65 @@ impl Snapdash {
                     Err(e) => {
                         self.theme_import_status = Some(Err(e.clone()));
                         self.set_status(format!("Theme import failed: {e}"), LogType::Error);
+                    }
+                }
+                Task::none()
+            }
+
+            Message::OpenThemeGallery => {
+                self.gallery_status = None;
+
+                // Window already open -> focus it
+                if let Some(opened) = find_window_id(&self.windows, WindowKind::ThemeGallery, None)
+                {
+                    return iced::window::gain_focus::<Message>(opened);
+                }
+
+                self.gallery = GalleryState::Loading;
+
+                let win = window_settings(iced::Size::new(640.0, 720.0), true);
+                let (id, task_id) = window::open(win);
+
+                // Fetch index is blocking - keep it off the UI thread.
+                let fetch = Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(crate::theme::fetch_index)
+                            .await
+                            .unwrap_or_else(|e| Err(format!("join error: {e}")))
+                    },
+                    Message::GalleryIndexFetched,
+                );
+
+                task_id
+                    .map(move |_| Message::WindowOpened {
+                        id,
+                        kind: WindowKind::ThemeGallery,
+                    })
+                    .chain(fetch)
+            }
+
+            Message::GalleryIndexFetched(Ok(themes)) => {
+                tracing::info!(count = themes.len(), "theme gallery loaded");
+                self.gallery = GalleryState::Loaded(themes);
+                Task::none()
+            }
+
+            Message::GalleryIndexFetched(Err(e)) => {
+                tracing::warn!(error = %e, "theme gallery fetch failed");
+                self.gallery = GalleryState::Failed(e);
+                Task::none()
+            }
+
+            Message::InstallGalleryTheme(theme) => {
+                match crate::theme::install_theme(&theme) {
+                    Ok(name) => {
+                        self.available_themes = crate::theme::available_themes();
+                        self.gallery_status = Some(Ok(format!("Installed `{name}`")));
+                        self.set_status(format!("Theme '{name}' installed"), LogType::Info);
+                    }
+                    Err(e) => {
+                        self.gallery_status = Some(Err(e.clone()));
+                        self.set_status(format!("Theme install failed: {e}"), LogType::Error);
                     }
                 }
                 Task::none()
@@ -1247,6 +1321,7 @@ impl Snapdash {
             }
             WindowKind::Settings => inner,
             WindowKind::ReleaseNotes => inner,
+            WindowKind::ThemeGallery => inner,
         };
 
         // Platform-specific outer wrapping:

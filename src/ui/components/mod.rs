@@ -7,8 +7,8 @@ pub mod settings_components;
 mod text;
 
 pub use button::{
-    ButtonType, ButtonVisual, danger_button, danger_button_with, icon_button, pill_button,
-    pill_button_with, primary_button,
+    ButtonType, ButtonVisual, badge_button, danger_button, danger_button_with, icon_button,
+    pill_button, pill_button_with, primary_button,
 };
 pub use card::{card, card_with_border, fieldset, subcard};
 pub use input::{mac_input, picker, themepicker, toggler};

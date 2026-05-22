@@ -23,6 +23,7 @@ pub fn window_content<'a>(
             app.config.widget_settings,
         ),
         WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
+        WindowKind::ThemeGallery => crate::ui::gallery::view(app, id),
     }
 }
 
@@ -81,5 +82,6 @@ pub fn with_mouse_area<'a>(
         WindowKind::Entity { .. } => ma.on_press(Message::StartDrag(id)).into(),
         WindowKind::Settings => ma.into(),
         WindowKind::ReleaseNotes => ma.into(),
+        WindowKind::ThemeGallery => ma.into(),
     }
 }

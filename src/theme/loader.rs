@@ -165,6 +165,26 @@ pub fn import_theme_file(source: &std::path::Path) -> Result<String, String> {
     Ok(theme.name)
 }
 
+/// Install a theme fetched from the gallery into the user themes
+/// directory. Unlike `import_theme_file` (which copies the original file
+/// bytes), this serializes the already-parsed `ThemeDef` back to JSON —
+/// the gallery hands us full defs, not a file on disk. Overwrites an
+/// existing same-named file, consistent with import.
+pub fn install_theme(theme: &ThemeDef) -> Result<String, String> {
+    let dir = themes_dir().ok_or_else(|| "Cannot resolve themes directory".to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create themes dir: {e}"))?;
+
+    let bytes =
+        serde_json::to_vec_pretty(theme).map_err(|e| format!("Cannot srialize theme: {e}"))?;
+
+    let filename = format!("{}.json", sanitize_filename(&theme.name));
+    let dest = dir.join(filename);
+
+    std::fs::write(&dest, &bytes).map_err(|e| format!("Cannot write theme: {e}"))?;
+    tracing::info!(name = %theme.name, path = %dest.display(), "installed theme from gallery");
+    Ok(theme.name.clone())
+}
+
 fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| match c {
@@ -177,6 +197,7 @@ fn sanitize_filename(name: &str) -> String {
         .trim_matches('-')
         .to_string()
 }
+
 //
 // TESTS
 //
