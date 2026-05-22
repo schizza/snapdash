@@ -2,27 +2,43 @@ use iced::Element;
 
 use crate::app::{Message, Snapdash};
 use crate::theme::ThemeDef;
-use crate::ui::components::settings_components;
+use crate::ui::components::{self, settings_components};
 use crate::widget_size::WidgetSize;
 
 pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
     let p = snap.theme.palette;
 
+    let mut theme_items = vec![
+        settings_components::item_with_picker(
+            "Theme",
+            None,
+            snap.available_themes.clone(),
+            snap.theme.clone(),
+            |theme: ThemeDef| Message::ThemeSelected(theme.name),
+            p,
+        ),
+        settings_components::item_with_badge_button(
+            "Import theme",
+            Some("Add a theme from a JSON file."),
+            "Import",
+            Some(crate::ui::icon::Icon::FolderOpen),
+            Some(Message::ImportTheme),
+            p,
+        ),
+    ];
+    match &snap.theme_import_status {
+        Some(Ok(msg)) => theme_items.push(components::success_message(msg.clone(), p)),
+        Some(Err(e)) => theme_items.push(components::error_message(e.clone(), p)),
+        None => {}
+    }
+
+    let theme_section = settings_components::section(theme_items, p);
+
     settings_components::page_with_sections(
         "Appearance",
         [
             // Theme section
-            settings_components::section(
-                [settings_components::item_with_picker(
-                    "Theme",
-                    None,
-                    snap.available_themes.clone(),
-                    snap.theme.clone(),
-                    |theme: ThemeDef| Message::ThemeSelected(theme.name),
-                    p,
-                )],
-                p,
-            ),
+            theme_section,
             // Widget section
             settings_components::section(
                 [
