@@ -186,7 +186,8 @@ pub fn install_theme(theme: &ThemeDef) -> Result<String, String> {
 }
 
 fn sanitize_filename(name: &str) -> String {
-    name.chars()
+    let slug = name
+        .chars()
         .map(|c| match c {
             'a'..='z' | '0'..='9' => c,
             'A'..='Z' => c.to_ascii_lowercase(),
@@ -195,7 +196,27 @@ fn sanitize_filename(name: &str) -> String {
         })
         .collect::<String>()
         .trim_matches('-')
-        .to_string()
+        .to_string();
+
+    let suffix = format!("{:08x}", fnv1a(name));
+
+    if slug.is_empty() {
+        format!("theme-{suffix}")
+    } else {
+        format!("{slug}-{suffix}")
+    }
+}
+
+/// FNV-1a 32-bit. Used only to disambiguate filename slugs — small and
+/// stable across runs/Rust versions (std's `DefaultHasher` is not
+/// guaranteed stable).
+fn fnv1a(s: &str) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in s.as_bytes() {
+        h ^= u32::from(*b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
 }
 
 //
@@ -304,8 +325,8 @@ mod tests {
 
     #[test]
     fn sanitize_makes_safe_filenames() {
-        assert_eq!(sanitize_filename("Dracula"), "dracula");
-        assert_eq!(sanitize_filename("My Cool Theme"), "my-cool-theme");
-        assert_eq!(sanitize_filename("Solarized (Light)"), "solarized--light");
+        assert!(sanitize_filename("Dracula").starts_with("dracula"));
+        assert!(sanitize_filename("My Cool Theme").starts_with("my-cool-theme"));
+        assert!(sanitize_filename("Solarized (Light)").starts_with("solarized--light"));
     }
 }

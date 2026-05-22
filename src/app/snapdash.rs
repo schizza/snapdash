@@ -501,33 +501,35 @@ impl Snapdash {
             Message::OpenThemeGallery => {
                 self.gallery_status = None;
 
-                // Window already open -> focus it
-                if let Some(opened) = find_window_id(&self.windows, WindowKind::ThemeGallery, None)
-                {
-                    return iced::window::gain_focus::<Message>(opened);
+                // Refetch on every open (incl. the in-window Retry button)
+                let fetch = if matches!(self.gallery, GalleryState::Loading) {
+                    Task::none()
+                } else {
+                    self.gallery = GalleryState::Loading;
+
+                    Task::perform(
+                        async {
+                            tokio::task::spawn_blocking(crate::theme::fetch_index)
+                                .await
+                                .unwrap_or_else(|e| Err(format!("join error: {e}")))
+                        },
+                        Message::GalleryIndexFetched,
+                    )
+                };
+
+                match find_window_id(&self.windows, WindowKind::ThemeGallery, None) {
+                    Some(opened) => iced::window::gain_focus(opened).chain(fetch),
+                    None => {
+                        let win = window_settings(iced::Size::new(640.0, 720.0), true);
+                        let (id, task_id) = window::open(win);
+                        task_id
+                            .map(move |_| Message::WindowOpened {
+                                id,
+                                kind: WindowKind::ThemeGallery,
+                            })
+                            .chain(fetch)
+                    }
                 }
-
-                self.gallery = GalleryState::Loading;
-
-                let win = window_settings(iced::Size::new(640.0, 720.0), true);
-                let (id, task_id) = window::open(win);
-
-                // Fetch index is blocking - keep it off the UI thread.
-                let fetch = Task::perform(
-                    async {
-                        tokio::task::spawn_blocking(crate::theme::fetch_index)
-                            .await
-                            .unwrap_or_else(|e| Err(format!("join error: {e}")))
-                    },
-                    Message::GalleryIndexFetched,
-                );
-
-                task_id
-                    .map(move |_| Message::WindowOpened {
-                        id,
-                        kind: WindowKind::ThemeGallery,
-                    })
-                    .chain(fetch)
             }
 
             Message::GalleryIndexFetched(Ok(themes)) => {

@@ -3,6 +3,35 @@
   "themes": [
     {
       "schema": 1,
+      "name": "Catppuccin Latte",
+      "author": "Catppuccin (port)",
+      "appearance": "light",
+      "palette": {
+        "bg": "#dce0e8",
+        "card": "#eff1f5",
+        "card_2": "#e6e9ef",
+        "text_primary": "#4c4f69",
+        "text_secondary": "#5c5f77",
+        "text_body": "#4c4f69",
+        "text_dim": "#8c8fa1",
+        "text_disabled": "#acb0be",
+        "border": "#9ca0b040",
+        "border_hovered": "#8c8fa1",
+        "accent": "#8839ef",
+        "accent_dim": "#7129d6",
+        "accent_tint": "#8839ef1f",
+        "shadow": {
+          "color": "#00000026",
+          "offset_x": 0.0,
+          "offset_y": 8.0,
+          "blur_radius": 18.0
+        },
+        "danger": "#d20f39",
+        "success": "#40a02b"
+      }
+    },
+    {
+      "schema": 1,
       "name": "Catppuccin Mocha",
       "author": "Catppuccin (port)",
       "appearance": "dark",
@@ -119,6 +148,64 @@
     },
     {
       "schema": 1,
+      "name": "One Dark",
+      "author": "Atom (port)",
+      "appearance": "dark",
+      "palette": {
+        "bg": "#21252b",
+        "card": "#282c34",
+        "card_2": "#24282f",
+        "text_primary": "#dcdfe4",
+        "text_secondary": "#b6bdca",
+        "text_body": "#abb2bf",
+        "text_dim": "#5c6370",
+        "text_disabled": "#4b5263",
+        "border": "#3e445180",
+        "border_hovered": "#5c6370",
+        "accent": "#61afef",
+        "accent_dim": "#4d97d6",
+        "accent_tint": "#61afef26",
+        "shadow": {
+          "color": "#00000059",
+          "offset_x": 0.0,
+          "offset_y": 10.0,
+          "blur_radius": 22.0
+        },
+        "danger": "#e06c75",
+        "success": "#98c379"
+      }
+    },
+    {
+      "schema": 1,
+      "name": "Rosé Pine",
+      "author": "Rosé Pine (port)",
+      "appearance": "dark",
+      "palette": {
+        "bg": "#191724",
+        "card": "#26233a",
+        "card_2": "#1f1d2e",
+        "text_primary": "#e0def4",
+        "text_secondary": "#c8c5e0",
+        "text_body": "#e0def4",
+        "text_dim": "#908caa",
+        "text_disabled": "#6e6a86",
+        "border": "#6e6a8666",
+        "border_hovered": "#908caa",
+        "accent": "#c4a7e7",
+        "accent_dim": "#a98fd0",
+        "accent_tint": "#c4a7e726",
+        "shadow": {
+          "color": "#00000059",
+          "offset_x": 0.0,
+          "offset_y": 10.0,
+          "blur_radius": 22.0
+        },
+        "danger": "#eb6f92",
+        "success": "#9ccfd8"
+      }
+    },
+    {
+      "schema": 1,
       "name": "Solarized Light",
       "author": "Ethan Schoonover (port)",
       "appearance": "light",
@@ -144,6 +231,35 @@
         },
         "danger": "#dc322f",
         "success": "#859900"
+      }
+    },
+    {
+      "schema": 1,
+      "name": "Tokyo Night",
+      "author": "Folke Lemaitre (port)",
+      "appearance": "dark",
+      "palette": {
+        "bg": "#1a1b26",
+        "card": "#24283b",
+        "card_2": "#1f2335",
+        "text_primary": "#c0caf5",
+        "text_secondary": "#a9b1d6",
+        "text_body": "#c0caf5",
+        "text_dim": "#565f89",
+        "text_disabled": "#414868",
+        "border": "#3b426180",
+        "border_hovered": "#565f89",
+        "accent": "#7aa2f7",
+        "accent_dim": "#6a8fde",
+        "accent_tint": "#7aa2f726",
+        "shadow": {
+          "color": "#00000059",
+          "offset_x": 0.0,
+          "offset_y": 10.0,
+          "blur_radius": 22.0
+        },
+        "danger": "#f7768e",
+        "success": "#9ece6a"
       }
     }
   ]
