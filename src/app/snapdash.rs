@@ -723,6 +723,7 @@ impl Snapdash {
             },
 
             Message::SettingsPageSelected(page) => {
+                self.theme_import_status = None;
                 self.settings_page = page;
 
                 // Refresh sysinfo page on selection
@@ -1023,6 +1024,7 @@ impl Snapdash {
                 {
                     self.theme = theme;
                     self.config.theme = name;
+                    self.theme_import_status = None;
                     self.save_config()
                 } else {
                     Task::none()
