@@ -135,6 +135,52 @@ fn load_one(path: &std::path::Path) -> anyhow::Result<ThemeDef> {
     Ok(theme)
 }
 
+/// Validates raw bytes as a theme, returning a descriptive error
+/// suitable for showing the user. Unlike the directory loader (which
+/// silently skips malformed files), import is explicit — the user
+/// picked this file and needs to know exactly why it failed.
+pub fn validate_theme_bytes(bytes: &[u8]) -> Result<ThemeDef, String> {
+    serde_json::from_slice::<ThemeDef>(bytes).map_err(|e| format!("Invalid theme file: {e}"))
+}
+
+/// Imports a theme file: validates it, then copies it into the user
+/// themes directory under a sanitized filename derived from the theme
+/// name. Returns the imported theme's display name on success.
+pub fn import_theme_file(source: &std::path::Path) -> Result<String, String> {
+    let bytes =
+        std::fs::read(source).map_err(|e| format!("Cannot read {}: {e}", source.display()))?;
+
+    // Validate first, do not copy garbage into theme folder
+    let theme = validate_theme_bytes(&bytes)?;
+
+    let dir = themes_dir().ok_or_else(|| "Cannon resolve themes directory".to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create themes dir: {e}"))?;
+
+    let filename = format!("{}.json", sanitize_filename(&theme.name));
+    let dest = dir.join(filename);
+
+    std::fs::write(&dest, &bytes).map_err(|e| format!("Cannot write theme: {e}"))?;
+
+    tracing::info!(name = %theme.name, path = %dest.display(), "imported theme");
+    Ok(theme.name)
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            'a'..='z' | '0'..='9' => c,
+            'A'..='Z' => c.to_ascii_lowercase(),
+            ' ' | '_' => '-',
+            _ => '-',
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+//
+// TESTS
+//
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +264,27 @@ mod tests {
                    "success": "#50fa7b"
                }
            }"##
+    }
+
+    #[test]
+    fn validate_accepts_good_theme() {
+        let bytes = valid_theme_json().as_bytes(); // reuse helper z loader testů
+        assert!(validate_theme_bytes(bytes).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_with_descriptive_error() {
+        let bytes = br##"{ "name": "Broken", "palette": { "bg": "#000000" } }"##;
+        let err = validate_theme_bytes(bytes).unwrap_err();
+        assert!(err.contains("Invalid theme file"));
+        // serde mentions the missing field
+        assert!(err.to_lowercase().contains("missing"));
+    }
+
+    #[test]
+    fn sanitize_makes_safe_filenames() {
+        assert_eq!(sanitize_filename("Dracula"), "dracula");
+        assert_eq!(sanitize_filename("My Cool Theme"), "my-cool-theme");
+        assert_eq!(sanitize_filename("Solarized (Light)"), "solarized--light");
     }
 }
