@@ -43,6 +43,31 @@ impl Adaptive {
     }
 }
 
+/// Per-widget visual emphasis. Doesn't change window size — only how
+/// prominent the value reads (color) and whether the card gets a steady
+/// accent ring. Stored per entity in Config (mirrors widget_positions);
+/// missing key = Normal.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Priority {
+    Low,
+    #[default]
+    Normal,
+    High,
+}
+
+impl Priority {
+    pub const ALL: &[Self] = &[Self::Low, Self::Normal, Self::High];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Normal => "Normal",
+            Self::High => "High",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum WidgetSize {
     Small,

@@ -1,11 +1,13 @@
-use iced::widget::{MouseArea, mouse_area};
+use iced::widget::{MouseArea, button, container, mouse_area, row, space};
 
-use iced::window;
 use iced::{Alignment, Element, Length};
+use iced::{Background, Border, window};
 
 use crate::app::{Message, WindowKind, WindowState};
+use crate::theme::Palette;
 use crate::ui::icon::Icon;
 use crate::ui::theme::icon_button;
+use crate::widget_size::Priority;
 
 /// Returns window content based on its kind (`Settings` / `Entity`).
 pub fn window_content<'a>(
@@ -15,13 +17,22 @@ pub fn window_content<'a>(
 ) -> Element<'a, Message> {
     match &win.kind {
         WindowKind::Settings => crate::ui::settings::view(app, id),
-        WindowKind::Entity { .. } => crate::ui::entity_window::view(
-            &win.entity,
-            app.theme.palette,
-            app.ha.connected,
-            app.update.is_available(),
-            app.config.widget_settings,
-        ),
+        WindowKind::Entity { entity_id } => {
+            let priority = app
+                .config
+                .widget_priorities
+                .get(entity_id)
+                .copied()
+                .unwrap_or_default();
+            crate::ui::entity_window::view(
+                &win.entity,
+                app.theme.palette,
+                app.ha.connected,
+                app.update.is_available(),
+                app.config.widget_settings,
+                priority,
+            )
+        }
         WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
         WindowKind::ThemeGallery => crate::ui::gallery::view(app, id),
     }
@@ -47,7 +58,7 @@ pub fn with_gear_overlay<'a>(
     let p = app.theme.palette;
 
     let gear_button = iced::widget::button(Icon::Gear.text(p))
-        .padding(8)
+        .padding(0)
         .on_press(Message::OpenSettings)
         .style(icon_button(p, 1.0));
 
@@ -59,7 +70,78 @@ pub fn with_gear_overlay<'a>(
         .padding(10)
         .into();
 
-    iced::widget::stack![inner, gear_layer].into()
+    let current = app
+        .config
+        .widget_priorities
+        .get(&win.entity.entity_id)
+        .copied()
+        .unwrap_or_default();
+
+    let priority_layer: Element<Message> =
+        iced::widget::container(priority_selector(&win.entity.entity_id, current, p))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Start)
+            .align_y(Alignment::End)
+            .padding(10)
+            .into();
+    iced::widget::stack![inner, priority_layer, gear_layer].into()
+}
+
+fn priority_selector<'a>(entity_id: &str, current: Priority, p: Palette) -> Element<'a, Message> {
+    let dots = Priority::ALL.iter().fold(row![].spacing(6), |acc, &level| {
+        acc.push(priority_dot(level, current, entity_id.to_owned(), p))
+    });
+
+    container(dots)
+        .padding([4, 8])
+        .style(move |_| container::Style {
+            background: Some(Background::Color(p.card_2)),
+            border: Border {
+                radius: 999.0.into(),
+                width: 1.0,
+                color: p.border,
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+fn priority_dot<'a>(
+    level: Priority,
+    current: Priority,
+    entity_id: String,
+    p: Palette,
+) -> Element<'a, Message> {
+    let active = level == current;
+    // Dot grows with the level so the control reads as low → high.
+    let size = match level {
+        Priority::Low => 6.0,
+        Priority::Normal => 8.0,
+        Priority::High => 10.0,
+    };
+    let fill = if active { p.accent } else { p.text_disabled };
+
+    let dot = container(space())
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .style(move |_| container::Style {
+            background: Some(Background::Color(fill)),
+            border: Border {
+                radius: 999.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+    button(container(dot).center(Length::Fixed(18.0)))
+        .padding(0)
+        .on_press(Message::WidgetPriorityChanged(entity_id, level))
+        .style(|_, _| iced::widget::button::Style {
+            background: None,
+            ..Default::default()
+        })
+        .into()
 }
 
 /// Wraps `MouseArea` with hover effect and added drag.

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use anyhow::{Context, Result};
 
-use crate::theme::DEFAULT_THEME;
+use crate::{theme::DEFAULT_THEME, widget_size::Priority};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -23,6 +23,8 @@ pub struct Config {
     pub widgets: Vec<String>,
     #[serde(default)]
     pub widget_positions: HashMap<String, WidgetPosition>,
+    #[serde(default)]
+    pub widget_priorities: HashMap<String, Priority>,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq)]
@@ -51,6 +53,7 @@ impl Default for Config {
             debug_overlay: false,
             widgets: Vec::new(),
             widget_positions: HashMap::new(),
+            widget_priorities: HashMap::new(),
             widget_settings: WidgetSettings {
                 widget_size: crate::widget_size::WidgetSize::default(),
                 adaptive: crate::widget_size::Adaptive::default(),
