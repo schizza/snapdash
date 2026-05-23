@@ -6,7 +6,7 @@ use crate::theme::loader::{available_themes, resolve_theme};
 use crate::ui::platform::window_settings;
 use crate::ui::settings::*;
 use crate::update;
-use crate::widget_size::WidgetSize;
+use crate::widget_size::{Priority, WidgetSize};
 use crate::{ha, logger};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -34,12 +34,23 @@ pub enum FocusDirection {
     Previous,
 }
 
+#[derive(Debug, Clone)]
+pub enum GalleryState {
+    Idle,
+    Loading,
+    Loaded(Vec<ThemeDef>),
+    Failed(String),
+}
+
 #[derive(Debug)]
 pub struct Snapdash {
     pub config: Config,
     pub token_presence: TokenPresence,
     pub theme: ThemeDef,
     pub available_themes: Vec<ThemeDef>,
+    pub theme_import_status: Option<Result<String, String>>,
+    pub gallery: GalleryState,
+    pub gallery_status: Option<Result<String, String>>,
 
     pub ha: ha::HaState,
 
@@ -90,6 +101,11 @@ pub enum Message {
     AnimationFrame(iced::time::Instant),
 
     ThemeSelected(String),
+    ImportTheme,
+    ThemeFilePicked(Option<std::path::PathBuf>),
+    OpenThemeGallery,
+    GalleryIndexFetched(Result<Vec<ThemeDef>, String>),
+    InstallGalleryTheme(ThemeDef),
     SaveConfig,
     ToggleWidget(String),
 
@@ -132,6 +148,7 @@ pub enum Message {
     ResetConfig,
 
     WidgetSizeChanged(WidgetSize),
+    WidgetPriorityChanged(String, Priority),
 
     InstallUpdate,
     UpdateInstelled(Result<std::path::PathBuf, String>),
@@ -174,6 +191,9 @@ impl Snapdash {
             token_presence: TokenPresence::Unchecked,
             theme,
             available_themes,
+            gallery: GalleryState::Idle,
+            gallery_status: None,
+            theme_import_status: None,
             ha: ha::HaState::default(),
             status: "-".into(),
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
@@ -444,6 +464,102 @@ impl Snapdash {
         match message {
             Message::Noop => Task::none(),
 
+            Message::ImportTheme => {
+                // Open native file picker.
+                // rfd returns FileHandle -> map to path
+
+                Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .add_filter("Theme", &["json"])
+                            .set_title("Import Snapdash theme")
+                            .pick_file()
+                            .await
+                            .map(|handle| handle.path().to_path_buf())
+                    },
+                    Message::ThemeFilePicked,
+                )
+            }
+
+            Message::ThemeFilePicked(None) => Task::none(),
+
+            Message::ThemeFilePicked(Some(path)) => {
+                match crate::theme::import_theme_file(&path) {
+                    Ok(name) => {
+                        // Re-scan
+                        self.available_themes = crate::theme::available_themes();
+                        self.theme_import_status = Some(Ok(format!("Imported `{name}`")));
+                        self.set_status(format!("Theme '{name}' imported"), LogType::Info);
+                    }
+                    Err(e) => {
+                        self.theme_import_status = Some(Err(e.clone()));
+                        self.set_status(format!("Theme import failed: {e}"), LogType::Error);
+                    }
+                }
+                Task::none()
+            }
+
+            Message::OpenThemeGallery => {
+                self.gallery_status = None;
+
+                // Refetch on every open (incl. the in-window Retry button)
+                let fetch = if matches!(self.gallery, GalleryState::Loading) {
+                    Task::none()
+                } else {
+                    self.gallery = GalleryState::Loading;
+
+                    Task::perform(
+                        async {
+                            tokio::task::spawn_blocking(crate::theme::fetch_index)
+                                .await
+                                .unwrap_or_else(|e| Err(format!("join error: {e}")))
+                        },
+                        Message::GalleryIndexFetched,
+                    )
+                };
+
+                match find_window_id(&self.windows, WindowKind::ThemeGallery, None) {
+                    Some(opened) => iced::window::gain_focus(opened).chain(fetch),
+                    None => {
+                        let win = window_settings(iced::Size::new(640.0, 720.0), true);
+                        let (id, task_id) = window::open(win);
+                        task_id
+                            .map(move |_| Message::WindowOpened {
+                                id,
+                                kind: WindowKind::ThemeGallery,
+                            })
+                            .chain(fetch)
+                    }
+                }
+            }
+
+            Message::GalleryIndexFetched(Ok(themes)) => {
+                tracing::info!(count = themes.len(), "theme gallery loaded");
+                self.gallery = GalleryState::Loaded(themes);
+                Task::none()
+            }
+
+            Message::GalleryIndexFetched(Err(e)) => {
+                tracing::warn!(error = %e, "theme gallery fetch failed");
+                self.gallery = GalleryState::Failed(e);
+                Task::none()
+            }
+
+            Message::InstallGalleryTheme(theme) => {
+                match crate::theme::install_theme(&theme) {
+                    Ok(name) => {
+                        self.available_themes = crate::theme::available_themes();
+                        self.gallery_status = Some(Ok(format!("Installed `{name}`")));
+                        self.set_status(format!("Theme '{name}' installed"), LogType::Info);
+                    }
+                    Err(e) => {
+                        self.gallery_status = Some(Err(e.clone()));
+                        self.set_status(format!("Theme install failed: {e}"), LogType::Error);
+                    }
+                }
+                Task::none()
+            }
+
             Message::CopySystemInfo => {
                 if let Some(snapshoot) = &self.sys_info {
                     let text = snapshoot.to_clipboard_string();
@@ -607,6 +723,17 @@ impl Snapdash {
                 TokenPresence::Unchecked => Task::none(),
             },
 
+            Message::WidgetPriorityChanged(entity_id, priority) => {
+                // Normal is default - drop the key instead of storing it
+                // so config stays lean and only deviations are persisted.
+                if priority == Priority::default() {
+                    self.config.widget_priorities.remove(&entity_id);
+                } else {
+                    self.config.widget_priorities.insert(entity_id, priority);
+                }
+                self.save_config()
+            }
+
             Message::WidgetSizeChanged(size) => {
                 self.config.widget_settings.widget_size = size;
 
@@ -684,6 +811,7 @@ impl Snapdash {
             },
 
             Message::SettingsPageSelected(page) => {
+                self.theme_import_status = None;
                 self.settings_page = page;
 
                 // Refresh sysinfo page on selection
@@ -984,6 +1112,7 @@ impl Snapdash {
                 {
                     self.theme = theme;
                     self.config.theme = name;
+                    self.theme_import_status = None;
                     self.save_config()
                 } else {
                     Task::none()
@@ -1206,6 +1335,7 @@ impl Snapdash {
             }
             WindowKind::Settings => inner,
             WindowKind::ReleaseNotes => inner,
+            WindowKind::ThemeGallery => inner,
         };
 
         // Platform-specific outer wrapping:

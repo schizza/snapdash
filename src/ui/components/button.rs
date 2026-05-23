@@ -259,6 +259,67 @@ pub fn primary_button<'a>(
     b
 }
 
+pub fn badge_button<'a>(
+    label: impl IntoFragment<'a>,
+    icon: Option<Icon>,
+    on_press: Option<Message>,
+    p: Palette,
+) -> iced::widget::Button<'a, Message> {
+    use iced::widget::button::{Status, Style};
+
+    let label_text =
+        iced::widget::text(label)
+            .size(text_size::NORMAL)
+            .style(move |_: &iced::Theme| iced::widget::text::Style {
+                color: Some(p.accent),
+            });
+
+    let content: Element<'a, Message> = match icon {
+        Some(icon) => iced::widget::row![icon.text(p).color(p.accent).size(11), label_text]
+            .spacing(6)
+            .align_y(iced::Alignment::Center)
+            .into(),
+
+        None => label_text.into(),
+    };
+
+    let mut b = iced::widget::button(content)
+        .padding([3, 10])
+        .style(move |_theme, status| {
+            let bg = match status {
+                Status::Hovered | Status::Pressed => iced::Color {
+                    a: 0.24,
+                    ..p.accent
+                },
+                Status::Disabled => iced::Color {
+                    a: 0.06,
+                    ..p.accent
+                },
+                Status::Active => p.accent_tint,
+            };
+            Style {
+                background: Some(iced::Background::Color(bg)),
+                text_color: if matches!(status, Status::Disabled) {
+                    p.text_disabled
+                } else {
+                    p.accent
+                },
+                border: iced::Border {
+                    radius: 999.0.into(),
+                    width: 1.0,
+                    color: p.accent,
+                },
+                ..Default::default()
+            }
+        });
+
+    if let Some(msg) = on_press {
+        b = b.on_press(msg);
+    }
+
+    b
+}
+
 pub fn pill_button<'a>(
     label: impl IntoFragment<'a>,
     p: Palette,

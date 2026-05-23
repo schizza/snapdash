@@ -5,7 +5,7 @@ use super::components;
 use crate::app::{EntityWindowState, Message};
 use crate::theme::Palette;
 use crate::ui::format::format_entity_value;
-use crate::widget_size::WidgetSize;
+use crate::widget_size::{Priority, WidgetSize};
 
 fn pretty_name(entity_id: &str) -> &str {
     entity_id.split('.').nth(1).unwrap_or(entity_id)
@@ -48,6 +48,7 @@ pub fn view(
     connected: bool,
     update: bool,
     widget_settings: crate::config::WidgetSettings,
+    priority: Priority,
 ) -> Element<'_, Message> {
     let (friendly, main_opt, detail) = format_main_value(state);
 
@@ -98,11 +99,18 @@ pub fn view(
         widget_settings.widget_size.value_font(),
         maybe_adapted_value.chars().count(),
     );
+
+    let value_color = match priority {
+        Priority::High => p.accent,
+        Priority::Normal => p.text_primary,
+        Priority::Low => p.text_dim,
+    };
+
     let value_text = text(maybe_adapted_value)
         .size(maybe_adaptet_font)
         .wrapping(iced::widget::text::Wrapping::None)
         .style(move |_: &iced::Theme| iced::widget::text::Style {
-            color: Some(p.text_primary),
+            color: Some(value_color),
         });
 
     let detail_line: Element<'static, Message> = if let Some(d) = detail {
@@ -119,7 +127,13 @@ pub fn view(
     let disconnected_text =
         components::error_message("You are disconected from Home Assistant!", p);
 
-    let ring = pulse_border(p, state.pulse.value());
+    let ring = match priority {
+        Priority::High => iced::Color {
+            a: 0.55,
+            ..p.accent
+        },
+        _ => pulse_border(p, state.pulse.value()),
+    };
 
     let inner = column![
         title_text,

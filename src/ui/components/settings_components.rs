@@ -1,6 +1,7 @@
 use crate::theme::{Palette, metric, text_size};
-use crate::ui::components::button::ButtonType;
+use crate::ui::components::button::{ButtonType, badge_button};
 use crate::ui::components::{self};
+use crate::ui::icon::Icon;
 use iced::Length;
 use iced::widget::{column, row};
 use iced::{Element, widget::text::IntoFragment};
@@ -219,6 +220,18 @@ pub fn item_with_icon_button<'a>(
             .into();
 
     item(label, helper, action, p)
+}
+
+pub fn item_with_badge_button<'a>(
+    label: impl IntoFragment<'a>,
+    helper: Option<impl IntoFragment<'a>>,
+    badge_label: impl IntoFragment<'a>,
+    icon: Option<Icon>,
+    on_press: Option<Message>,
+    p: Palette,
+) -> Element<'a, Message> {
+    let action = badge_button(badge_label, icon, on_press, p);
+    item(label, helper, action.into(), p)
 }
 
 /// Function will create settings item from any Element as left side

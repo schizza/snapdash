@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "name": "Rosé Pine",
+  "author": "Rosé Pine (port)",
+  "appearance": "dark",
+  "palette": {
+    "bg": "#191724",
+    "card": "#26233a",
+    "card_2": "#1f1d2e",
+    "text_primary": "#e0def4",
+    "text_secondary": "#c8c5e0",
+    "text_body": "#e0def4",
+    "text_dim": "#908caa",
+    "text_disabled": "#6e6a86",
+    "border": "#6e6a8666",
+    "border_hovered": "#908caa",
+    "accent": "#c4a7e7",
+    "accent_dim": "#a98fd0",
+    "accent_tint": "#c4a7e726",
+    "shadow": { "color": "#00000059", "offset_x": 0.0, "offset_y": 10.0, "blur_radius": 22.0 },
+    "danger": "#eb6f92",
+    "success": "#9ccfd8"
+  }
+}

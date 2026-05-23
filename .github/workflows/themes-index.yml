@@ -1,0 +1,53 @@
+name: Generate themes index
+
+# Aggregates assets/themes/*.json into assets/themes/index.json so the
+# in-app theme gallery can fetch a single file (full ThemeDefs embedded)
+# instead of listing the directory via the rate-limited GitHub API.
+#
+# Contributors just add a theme file — the index regenerates here on
+# merge, no manual editing.
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      # Trigger on theme files, but NOT on index.json itself — otherwise
+      # this job's own commit would re-trigger it.
+      - 'assets/themes/*.json'
+      - '!assets/themes/index.json'
+      - '.github/workflows/themes-index.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: themes-index-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate index.json
+        run: |
+          cd assets/themes
+          # Remove the old index first so the glob matches only theme
+          # files — avoids slurping index.json into itself and sidesteps
+          # shell word-splitting differences.
+          rm -f index.json
+          jq -s '{ schema: 1, themes: . }' *.json > index.json
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- assets/themes/index.json; then
+            echo "index.json unchanged — nothing to commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add assets/themes/index.json
+            git commit -m "chore(themes): regenerate index.json [skip ci]"
+            git push
+          fi

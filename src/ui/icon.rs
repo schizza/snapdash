@@ -18,6 +18,7 @@ pub enum Icon {
     Unknown,
     Refresh,
     ExternalLink,
+    FolderOpen,
 }
 
 impl Icon {
@@ -34,6 +35,7 @@ impl Icon {
             Self::Unknown => '\u{e47b}',
             Self::Refresh => '\u{e144}',
             Self::ExternalLink => '\u{e0b9}',
+            Self::FolderOpen => '\u{e247}',
         }
     }
 

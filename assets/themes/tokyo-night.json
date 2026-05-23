@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "name": "Tokyo Night",
+  "author": "Folke Lemaitre (port)",
+  "appearance": "dark",
+  "palette": {
+    "bg": "#1a1b26",
+    "card": "#24283b",
+    "card_2": "#1f2335",
+    "text_primary": "#c0caf5",
+    "text_secondary": "#a9b1d6",
+    "text_body": "#c0caf5",
+    "text_dim": "#565f89",
+    "text_disabled": "#414868",
+    "border": "#3b426180",
+    "border_hovered": "#565f89",
+    "accent": "#7aa2f7",
+    "accent_dim": "#6a8fde",
+    "accent_tint": "#7aa2f726",
+    "shadow": { "color": "#00000059", "offset_x": 0.0, "offset_y": 10.0, "blur_radius": 22.0 },
+    "danger": "#f7768e",
+    "success": "#9ece6a"
+  }
+}
