@@ -163,7 +163,7 @@ pub fn import_theme_file(source: &std::path::Path) -> Result<String, String> {
     // so reimport overwrites cleanly instead of leaving a stale duplicate
     remove_existing_by_name(&dir, &theme.name);
     let dest = theme_dest_path(&dir, &theme.name);
-    
+
     std::fs::write(&dest, &bytes).map_err(|e| format!("Cannot write theme: {e}"))?;
 
     tracing::info!(name = %theme.name, path = %dest.display(), "imported theme");
