@@ -6,7 +6,7 @@ use crate::theme::loader::{available_themes, resolve_theme};
 use crate::ui::platform::window_settings;
 use crate::ui::settings::*;
 use crate::update;
-use crate::widget_size::WidgetSize;
+use crate::widget_size::{Priority, WidgetSize};
 use crate::{ha, logger};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -148,6 +148,7 @@ pub enum Message {
     ResetConfig,
 
     WidgetSizeChanged(WidgetSize),
+    WidgetPriorityChanged(String, Priority),
 
     InstallUpdate,
     UpdateInstelled(Result<std::path::PathBuf, String>),
@@ -721,6 +722,17 @@ impl Snapdash {
                 TokenPresence::Checking => Task::none(),
                 TokenPresence::Unchecked => Task::none(),
             },
+
+            Message::WidgetPriorityChanged(entity_id, priority) => {
+                // Normal is default - drop the key instead of storing it
+                // so config stays lean and only deviations are persisted.
+                if priority == Priority::default() {
+                    self.config.widget_priorities.remove(&entity_id);
+                } else {
+                    self.config.widget_priorities.insert(entity_id, priority);
+                }
+                self.save_config()
+            }
 
             Message::WidgetSizeChanged(size) => {
                 self.config.widget_settings.widget_size = size;
