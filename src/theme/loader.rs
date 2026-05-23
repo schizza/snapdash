@@ -163,10 +163,7 @@ pub fn import_theme_file(source: &std::path::Path) -> Result<String, String> {
     // so reimport overwrites cleanly instead of leaving a stale duplicate
     remove_existing_by_name(&dir, &theme.name);
     let dest = theme_dest_path(&dir, &theme.name);
-
-    // let filename = format!("{}.json", sanitize_filename(&theme.name));
-    // let dest = dir.join(filename);
-
+    
     std::fs::write(&dest, &bytes).map_err(|e| format!("Cannot write theme: {e}"))?;
 
     tracing::info!(name = %theme.name, path = %dest.display(), "imported theme");
@@ -190,9 +187,6 @@ pub fn install_theme(theme: &ThemeDef) -> Result<String, String> {
     remove_existing_by_name(&dir, &theme.name);
     let dest = theme_dest_path(&dir, &theme.name);
 
-    // let filename = format!("{}.json", sanitize_filename(&theme.name));
-    // let dest = dir.join(filename);
-
     std::fs::write(&dest, &bytes).map_err(|e| format!("Cannot write theme: {e}"))?;
     tracing::info!(name = %theme.name, path = %dest.display(), "installed theme from gallery");
     Ok(theme.name.clone())
@@ -210,15 +204,7 @@ fn sanitize_slug(name: &str) -> String {
         })
         .collect::<String>()
         .trim_matches('-')
-        .to_string();
-
-    let suffix = format!("{:08x}", fnv1a(name));
-
-    if slug.is_empty() {
-        format!("theme-{suffix}")
-    } else {
-        format!("{slug}-{suffix}")
-    }
+        .to_string()
 }
 
 /// Resolve the file a theme should be written to. Clean slug by default
