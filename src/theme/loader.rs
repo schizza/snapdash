@@ -210,7 +210,15 @@ fn sanitize_slug(name: &str) -> String {
         })
         .collect::<String>()
         .trim_matches('-')
-        .to_string()
+        .to_string();
+
+    let suffix = format!("{:08x}", fnv1a(name));
+
+    if slug.is_empty() {
+        format!("theme-{suffix}")
+    } else {
+        format!("{slug}-{suffix}")
+    }
 }
 
 /// Resolve the file a theme should be written to. Clean slug by default
