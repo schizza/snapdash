@@ -3,7 +3,8 @@ use iced::{Alignment, Element, Length};
 
 use super::components;
 use crate::app::{EntityWindowState, Message};
-use crate::theme::Palette;
+use crate::theme::{Palette, metric};
+use crate::ui::components::title;
 use crate::ui::format::format_entity_value;
 use crate::widget_size::{Priority, WidgetSize};
 
@@ -26,7 +27,11 @@ fn format_main_value(
 fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
     let dot = components::status_dot(p, connected);
 
-    row![dot].spacing(8).align_y(Alignment::End).into()
+    row![dot]
+        .spacing(8)
+        .align_y(Alignment::End)
+        .height(Length::Fill)
+        .into()
 }
 
 /// Ring pulse color for the card border.
@@ -134,31 +139,49 @@ pub fn view(
 
     let ring = pulse_border(p, state.pulse.value(), priority);
 
-    let inner = column![
-        title_text,
-        space().height(widget_settings.widget_size.title_value_gap()),
+    let mut inner_column = column![]
+        .spacing(0)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    let inner = if !connected {
+        inner_column = inner_column.push(title_text);
+        inner_column =
+            inner_column.push(space().height(widget_settings.widget_size.title_value_gap()));
+        inner_column = inner_column.push(disconnected_text);
+
+        inner_column
+    } else {
+        inner_column = inner_column.push(title_text);
+        inner_column =
+            inner_column.push(space().height(widget_settings.widget_size.title_value_gap()));
+        inner_column = inner_column.push(
+            iced::widget::container(value_text)
+                .height(Length::Fill)
+                .width(Length::Fill),
+        );
+        inner_column =
+            inner_column.push(space().height(widget_settings.widget_size.value_detail_gap()));
+
+        let detail_line = if widget_settings.widget_size == WidgetSize::Small
+            || !widget_settings.show_measurement_info
         {
-            if !connected {
-                disconnected_text
-            } else {
-                value_text.into()
-            }
-        },
-        space().height(widget_settings.widget_size.value_detail_gap()),
-        {
-            if widget_settings.widget_size == WidgetSize::Small
-                || !widget_settings.show_measurement_info
-            {
-                space().height(0).width(0).into()
-            } else {
-                detail_line
-            }
-        },
-        status_line(p, connected),
-    ]
-    .spacing(0)
-    .width(Length::Fill)
-    .height(Length::Fill);
+            space().height(0).width(0).into()
+        } else {
+            detail_line
+        };
+
+        let status_line = row![status_line(p, connected), detail_line]
+            .spacing(metric::GAP)
+            .height(Length::Fill)
+            .height(Length::Fill)
+            .align_y(Alignment::End);
+
+        //        inner_column = inner_column.push(detail_line);
+        inner_column = inner_column.push(status_line);
+
+        inner_column
+    };
 
     components::card_with_border(inner.into(), p, ring)
 }
