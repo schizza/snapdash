@@ -29,17 +29,22 @@ fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
     row![dot].spacing(8).align_y(Alignment::End).into()
 }
 
-fn pulse_border(p: Palette, pulse: f32) -> iced::Color {
+/// Ring pulse color for the card border.
+///
+/// Normal/Low widgets rest faint and flash to accent on a state update
+/// (dimmed → accent → dimmed). High-priority widgets rest on a steady
+/// accent ring and *invert* the pulse — they dip to dimmed and return
+/// (accent → dimmed → accent) — so the update feedback survives the
+/// always-on emphasis ring.
+fn pulse_border(p: Palette, pulse: f32, priority: Priority) -> iced::Color {
     let t = pulse.clamp(0.0, 1.0);
 
-    let a = 0.10 + 0.55 * t;
+    let a = match priority {
+        Priority::Low | Priority::Normal => 0.15 + 0.55 * t,
+        Priority::High => 0.65 - 0.50 * t,
+    };
 
-    iced::Color {
-        r: p.accent.r,
-        g: p.accent.g,
-        b: p.accent.b,
-        a,
-    }
+    iced::Color { a, ..p.accent }
 }
 
 pub fn view(
@@ -127,13 +132,7 @@ pub fn view(
     let disconnected_text =
         components::error_message("You are disconected from Home Assistant!", p);
 
-    let ring = match priority {
-        Priority::High => iced::Color {
-            a: 0.55,
-            ..p.accent
-        },
-        _ => pulse_border(p, state.pulse.value()),
-    };
+    let ring = pulse_border(p, state.pulse.value(), priority);
 
     let inner = column![
         title_text,
