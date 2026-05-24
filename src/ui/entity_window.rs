@@ -4,7 +4,6 @@ use iced::{Alignment, Element, Length};
 use super::components;
 use crate::app::{EntityWindowState, Message};
 use crate::theme::{Palette, metric};
-use crate::ui::components::title;
 use crate::ui::format::format_entity_value;
 use crate::widget_size::{Priority, WidgetSize};
 
