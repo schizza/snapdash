@@ -90,6 +90,7 @@ pub enum Message {
     OpenEntity(String),
     OpenReleaseNotes,
     OpenUrl(String),
+    OpenWidgetSettings(String),
     CloseWindow(window::Id),
     QuitApp,
     WindowClosed(window::Id),
@@ -149,6 +150,7 @@ pub enum Message {
 
     WidgetSizeChanged(WidgetSize),
     WidgetPriorityChanged(String, Priority),
+    WidgetNameChanged(String, String),
 
     InstallUpdate,
     UpdateInstelled(Result<std::path::PathBuf, String>),
@@ -458,6 +460,30 @@ impl Snapdash {
 
     fn is_entity_window_open(&self, entity_id: &str) -> bool {
         self.entity_windows.contains_key(entity_id)
+    }
+
+    /// Resolved title for a widget: custom override (if any) → HA
+    /// friendly_name → bare entity_id without the domain prefix.
+    pub fn display_name(&self, entity_id: &str) -> String {
+        if let Some(name) = self
+            .config
+            .widget_names
+            .get(entity_id)
+            .filter(|s| !s.is_empty())
+        {
+            return name.clone();
+        }
+
+        if let Some(name) = self
+            .ha
+            .entities
+            .get(entity_id)
+            .and_then(|s| s.attributes.get("friendly_name").and_then(|v| v.as_str()))
+        {
+            return name.to_owned();
+        }
+
+        entity_id.split('.').nth(1).unwrap_or(entity_id).to_owned()
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -1241,6 +1267,20 @@ impl Snapdash {
                     kind: WindowKind::ReleaseNotes,
                 })
             }
+            Message::OpenWidgetSettings(entity_id) => {
+                let kind = WindowKind::WidgetSettings { entity_id };
+
+                if let Some(opened) = find_window_id(&self.windows, kind.clone(), None) {
+                    return iced::window::gain_focus::<Message>(opened);
+                }
+
+                let settings = window_settings(iced::Size::new(540.0, 540.0), true);
+                let (id, task_id) = window::open(settings);
+                task_id.map(move |_| Message::WindowOpened {
+                    id,
+                    kind: kind.clone(),
+                })
+            }
             Message::OpenUrl(url) => {
                 if let Err(e) = open::that(&url) {
                     tracing::warn!(url, error = %e, "failed to open URL");
@@ -1278,6 +1318,21 @@ impl Snapdash {
                     },
                     |_| Message::PersistWidgetPositions,
                 )
+            }
+
+            Message::WidgetNameChanged(entity_id, raw) => {
+                // Empty/whitespace → drop the override so the widget falls
+                // back to HA's friendly_name (mirrors the "Normal = drop"
+                // pattern from priority — only deviations are persisted).
+                
+                if raw.trim().is_empty() {
+                    self.config.widget_names.remove(&entity_id);
+                } else {
+                    self.config
+                        .widget_names
+                        .insert(entity_id, raw);
+                }
+                self.save_config()
             }
 
             Message::PersistWidgetPositions => {
@@ -1336,6 +1391,7 @@ impl Snapdash {
             WindowKind::Settings => inner,
             WindowKind::ReleaseNotes => inner,
             WindowKind::ThemeGallery => inner,
+            WindowKind::WidgetSettings { .. } => inner,
         };
 
         // Platform-specific outer wrapping:

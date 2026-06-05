@@ -7,10 +7,6 @@ use crate::theme::{Palette, metric};
 use crate::ui::format::format_entity_value;
 use crate::widget_size::{Priority, WidgetSize};
 
-fn pretty_name(entity_id: &str) -> &str {
-    entity_id.split('.').nth(1).unwrap_or(entity_id)
-}
-
 fn format_main_value(
     state: &EntityWindowState,
 ) -> (Option<String>, Option<String>, Option<String>) {
@@ -58,8 +54,9 @@ pub fn view(
     update: bool,
     widget_settings: crate::config::WidgetSettings,
     priority: Priority,
+    title: String,
 ) -> Element<'_, Message> {
-    let (friendly, main_opt, detail) = format_main_value(state);
+    let (_friendly, main_opt, detail) = format_main_value(state);
 
     let update_button = components::icon_button(
         crate::ui::icon::Icon::Download,
@@ -75,28 +72,13 @@ pub fn view(
         .interaction(iced::mouse::Interaction::Pointer)
         .into();
 
-    let mut title_text = if let Some(name) = friendly {
-        row![
-            column![
-                text(name)
-                    .size(widget_settings.widget_size.title_font())
-                    .style(move |_: &iced::Theme| {
-                        iced::widget::text::Style {
-                            color: Some(p.text_secondary),
-                        }
-                    }),
-            ]
-            .width(iced::Fill),
-        ]
-    } else {
-        row![
-            text(pretty_name(&state.entity_id))
-                .size(widget_settings.widget_size.title_font())
-                .style(move |_: &iced::Theme| iced::widget::text::Style {
-                    color: Some(p.text_secondary),
-                }),
-        ]
-    };
+    let title_widget = text(title)
+        .size(widget_settings.widget_size.title_font())
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(p.text_secondary),
+        });
+
+    let mut title_text = row![column![title_widget].width(iced::Fill)];
 
     if update {
         title_text = title_text.push(update_icon)

@@ -19,6 +19,7 @@ pub enum Icon {
     Refresh,
     ExternalLink,
     FolderOpen,
+    Sliders,
 }
 
 impl Icon {
@@ -36,6 +37,7 @@ impl Icon {
             Self::Refresh => '\u{e144}',
             Self::ExternalLink => '\u{e0b9}',
             Self::FolderOpen => '\u{e247}',
+            Self::Sliders => '\u{e29a}',
         }
     }
 

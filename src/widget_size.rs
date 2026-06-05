@@ -47,7 +47,7 @@ impl Adaptive {
 /// prominent the value reads (color) and whether the card gets a steady
 /// accent ring. Stored per entity in Config (mirrors widget_positions);
 /// missing key = Normal.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum Priority {
     Low,
@@ -65,6 +65,12 @@ impl Priority {
             Self::Normal => "Normal",
             Self::High => "High",
         }
+    }
+}
+
+impl std::fmt::Display for Priority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
     }
 }
 

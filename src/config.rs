@@ -25,6 +25,8 @@ pub struct Config {
     pub widget_positions: HashMap<String, WidgetPosition>,
     #[serde(default)]
     pub widget_priorities: HashMap<String, Priority>,
+    #[serde(default)]
+    pub widget_names: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq)]
@@ -59,6 +61,7 @@ impl Default for Config {
                 adaptive: crate::widget_size::Adaptive::default(),
                 show_measurement_info: true,
             },
+            widget_names: HashMap::new(),
         }
     }
 }
