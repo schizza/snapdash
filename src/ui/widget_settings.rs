@@ -209,7 +209,7 @@ fn trigger_hint<'a>(
     p: crate::theme::Palette,
 ) -> Element<'a, Message> {
     if snap.ha.entities.contains_key(trigger) {
-        components::success_message(format!("Trigger found in Home Assistant"), p)
+        components::success_message("Trigger found in Home Assistant".to_string(), p)
     } else {
         components::error_message(
             format!("Trigger not found in HA — `{trigger}` won't match anything"),
