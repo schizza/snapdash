@@ -60,6 +60,7 @@ pub struct Snapdash {
     pub status: String,
 
     pub entity_windows: HashMap<String, window::Id>,
+    pub entity_windows_opening: HashSet<String>,
     pub boot_open_done: bool,
 
     pub settings_sensors: Vec<SettingsSensor>,
@@ -152,6 +153,11 @@ pub enum Message {
     WidgetPriorityChanged(String, Priority),
     WidgetNameChanged(String, String),
 
+    WidgetVisibilityToggled(String, bool),
+    WidgetVisibilityTriggerChanged(String, String),
+    WidgetVisibilityConditionChanged(String, crate::widget_visibility::ConditionKind),
+    WidgetVisibilityValueChanged(String, String),
+
     InstallUpdate,
     UpdateInstelled(Result<std::path::PathBuf, String>),
     RestartAfterUpdate(std::path::PathBuf),
@@ -201,6 +207,7 @@ impl Snapdash {
             theme_options: vec![ThemeKind::MacLight, ThemeKind::MacDark],
             windows: HashMap::new(),
             entity_windows: HashMap::new(),
+            entity_windows_opening: HashSet::new(),
             boot_open_done: false,
             settings_sensors: Vec::new(),
             selected_widgets: HashSet::new(),
@@ -413,11 +420,13 @@ impl Snapdash {
             }
             HaEvent::InitialState(states) => {
                 self.apply_initial_states(states);
-                Task::none()
+
+                // we can evaluate any rules whose triggers we previously didn't know.
+                self.update_widget_visibility()
             }
             HaEvent::StateChanged { new_state } => {
                 self.apply_entity_state(new_state);
-                Task::none()
+                self.update_widget_visibility()
             }
             HaEvent::AuthFailed(error) => {
                 self.ha.connected = false;
@@ -460,6 +469,7 @@ impl Snapdash {
 
     fn is_entity_window_open(&self, entity_id: &str) -> bool {
         self.entity_windows.contains_key(entity_id)
+            || self.entity_windows_opening.contains(entity_id)
     }
 
     /// Resolved title for a widget: custom override (if any) → HA
@@ -484,6 +494,49 @@ impl Snapdash {
         }
 
         entity_id.split('.').nth(1).unwrap_or(entity_id).to_owned()
+    }
+
+    /// `true` when a widget should currently be shown. No rule → always
+    /// visible. Rule → delegate to its evaluator against current HA
+    /// entities.
+    pub fn is_widget_visible(&self, entity_id: &str) -> bool {
+        match self.config.widget_visibility.get(entity_id) {
+            None => true,
+            Some(rule) => rule.evaluate(&self.ha.entities),
+        }
+    }
+
+    /// Walk every rule-gated widget and emit OpenEntity / CloseWindow
+    /// tasks for the deltas (newly-visible-but-not-open, or
+    /// currently-open-but-now-hidden). Widgets WITHOUT a rule are not
+    /// touched — they're under user control, otherwise closing one
+    /// manually would have it bounce right back open.
+    fn update_widget_visibility(&mut self) -> Task<Message> {
+        let mut tasks: Vec<Task<Message>> = Vec::new();
+
+        for (entity_id, rule) in &self.config.widget_visibility {
+            if !self.config.widgets.contains(entity_id) {
+                continue;
+            }
+
+            let visible = rule.evaluate(&self.ha.entities);
+
+            if visible {
+                if !self.is_entity_window_open(entity_id) {
+                    tracing::debug!(entity = %entity_id, "visibility rule: opening widget");
+                    tasks.push(Task::done(Message::OpenEntity(entity_id.clone())));
+                }
+            } else if let Some(&id) = self.entity_windows.get(entity_id) {
+                tracing::debug!(entity = %entity_id, "visibility rule: closing widget");
+                tasks.push(Task::done(Message::CloseWindow(id)));
+            }
+        }
+
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(tasks)
+        }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -1004,6 +1057,7 @@ impl Snapdash {
                     }
 
                     self.entity_windows.insert(entity_id.clone(), id);
+                    self.entity_windows_opening.remove(entity_id);
                 }
 
                 self.windows.insert(id, WindowState { kind, entity });
@@ -1016,6 +1070,7 @@ impl Snapdash {
                     && let WindowKind::Entity { entity_id } = window.kind
                 {
                     self.entity_windows.remove(&entity_id);
+                    self.entity_windows_opening.remove(&entity_id);
                 }
 
                 if self.windows.is_empty() {
@@ -1089,8 +1144,16 @@ impl Snapdash {
             }
 
             Message::OpenEntity(entity_id) => {
+                // Bulk boot-open: skip widgets currently hidden by their rule.
+                // At boot HA is not connected, so an gated widget eveluates to "trigger unkonwn"
+                // and will open later once HA is connected
                 let widgets: Vec<String> = if entity_id.is_empty() {
-                    self.config.widgets.clone()
+                    self.config
+                        .widgets
+                        .iter()
+                        .filter(|id| self.is_widget_visible(id))
+                        .cloned()
+                        .collect()
                 } else {
                     vec![entity_id]
                 };
@@ -1103,6 +1166,10 @@ impl Snapdash {
                     if self.is_entity_window_open(&widget) {
                         continue;
                     }
+
+                    // Reserve slot immediatelly, so another event fired before our
+                    // WindowOpened arrives sees the entity as already-being-opened and skips it.
+                    self.entity_windows_opening.insert(widget.clone());
 
                     let mut win_settings = window_settings(
                         self.config.widget_settings.widget_size.window_size(),
@@ -1324,15 +1391,60 @@ impl Snapdash {
                 // Empty/whitespace → drop the override so the widget falls
                 // back to HA's friendly_name (mirrors the "Normal = drop"
                 // pattern from priority — only deviations are persisted).
-                
+
                 if raw.trim().is_empty() {
                     self.config.widget_names.remove(&entity_id);
                 } else {
-                    self.config
-                        .widget_names
-                        .insert(entity_id, raw);
+                    self.config.widget_names.insert(entity_id, raw);
                 }
                 self.save_config()
+            }
+
+            Message::WidgetVisibilityToggled(entity_id, on) => {
+                if on {
+                    // Sensible default: self-trigger + IsAvailable —
+                    // covers "show this sensor only while it reports
+                    // something real" without forcing the user to pick a
+                    // trigger entity upfront.
+                    self.config.widget_visibility.insert(
+                        entity_id.clone(),
+                        crate::widget_visibility::VisibilityRule {
+                            trigger: entity_id,
+                            condition: crate::widget_visibility::VisibilityCondition::IsAvailable,
+                        },
+                    );
+                } else {
+                    self.config.widget_visibility.remove(&entity_id);
+                }
+                self.save_config().chain(self.update_widget_visibility())
+            }
+
+            Message::WidgetVisibilityTriggerChanged(entity_id, trigger) => {
+                if let Some(rule) = self.config.widget_visibility.get_mut(&entity_id) {
+                    rule.trigger = trigger;
+                }
+                self.save_config().chain(self.update_widget_visibility())
+            }
+
+            Message::WidgetVisibilityConditionChanged(entity_id, kind) => {
+                if let Some(rule) = self.config.widget_visibility.get_mut(&entity_id) {
+                    let raw = rule
+                        .condition
+                        .raw_value()
+                        .map(String::from)
+                        .unwrap_or_default();
+                    rule.condition = kind.with_value(raw);
+                }
+                self.save_config().chain(self.update_widget_visibility())
+            }
+
+            Message::WidgetVisibilityValueChanged(entity_id, raw) => {
+                if let Some(rule) = self.config.widget_visibility.get_mut(&entity_id) {
+                    let kind =
+                        crate::widget_visibility::ConditionKind::from_condition(&rule.condition);
+                    rule.condition = kind.with_value(raw);
+                }
+                self.save_config().chain(self.update_widget_visibility())
             }
 
             Message::PersistWidgetPositions => {
