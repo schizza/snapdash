@@ -1401,7 +1401,7 @@ impl Snapdash {
             }
 
             Message::WidgetVisibilityToggled(entity_id, on) => {
-                if on {
+                let post_task = if on {
                     // Sensible default: self-trigger + IsAvailable —
                     // covers "show this sensor only while it reports
                     // something real" without forcing the user to pick a
@@ -1413,10 +1413,17 @@ impl Snapdash {
                             condition: crate::widget_visibility::VisibilityCondition::IsAvailable,
                         },
                     );
+                    self.update_widget_visibility()
                 } else {
                     self.config.widget_visibility.remove(&entity_id);
-                }
-                self.save_config().chain(self.update_widget_visibility())
+                    if self.is_entity_window_open(&entity_id) {
+                        Task::none()
+                    } else {
+                        Task::done(Message::OpenEntity(entity_id))
+                    }
+                };
+
+                self.save_config().chain(post_task)
             }
 
             Message::WidgetVisibilityTriggerChanged(entity_id, trigger) => {
