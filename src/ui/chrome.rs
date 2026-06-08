@@ -31,10 +31,14 @@ pub fn window_content<'a>(
                 app.update.is_available(),
                 app.config.widget_settings,
                 priority,
+                app.display_name(entity_id),
             )
         }
         WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
         WindowKind::ThemeGallery => crate::ui::gallery::view(app, id),
+        WindowKind::WidgetSettings { entity_id } => {
+            crate::ui::widget_settings::view(app, id, entity_id)
+        }
     }
 }
 
@@ -70,6 +74,25 @@ pub fn with_gear_overlay<'a>(
         .padding(10)
         .into();
 
+    // Per-widget Configure button (top-right). Distinct from the
+    // app-settings gear (bottom-right) — gear opens app Settings, sliders
+    // open this widget's settings dialog. The priority dots stay in the
+    // opposite corner (bottom-left) as a quick-access shortcut for the
+    // most-frequent tweak. Gear will move to the system tray in a future
+    // release; sliders + dots will remain on the widget.
+    let configure_button = iced::widget::button(Icon::Sliders.text(p))
+        .padding(0)
+        .on_press(Message::OpenWidgetSettings(win.entity.entity_id.clone()))
+        .style(icon_button(p, 1.0));
+
+    let configure_layer: Element<Message> = iced::widget::container(configure_button)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::End)
+        .align_y(Alignment::Center)
+        .padding(10)
+        .into();
+
     let current = app
         .config
         .widget_priorities
@@ -85,7 +108,7 @@ pub fn with_gear_overlay<'a>(
             .align_y(Alignment::End)
             .padding(10)
             .into();
-    iced::widget::stack![inner, priority_layer, gear_layer].into()
+    iced::widget::stack![inner, priority_layer, configure_layer, gear_layer].into()
 }
 
 fn priority_selector<'a>(entity_id: &str, current: Priority, p: Palette) -> Element<'a, Message> {
@@ -165,5 +188,6 @@ pub fn with_mouse_area<'a>(
         WindowKind::Settings => ma.into(),
         WindowKind::ReleaseNotes => ma.into(),
         WindowKind::ThemeGallery => ma.into(),
+        WindowKind::WidgetSettings { .. } => ma.into(),
     }
 }
