@@ -35,13 +35,16 @@ SnapDash is designed to run quietly in the background without leaks, lag, or sur
 - **Real-time** updates via Home Assistant WebSocket API
 - **Frameless widgets** - pin individual sensors as floating macOS-style cards
 - **Native look** - Mac Light / Mac Dark themes, smooth pulse animations on state change
-- **Custom themes** - drop a JSON file in your themes folder to fully recolor the UI; share or download themes like Dracula, Nord, Catppuccin
-- **Secure token storage** - credentials lives in OS keychain (macOD Keychain / Windows Credential Manager / Linux Secret Service), never in plain text
+- **Custom themes** - browse and install community themes from the in-app gallery, import your own JSON, or drop a file into the themes folder. 9 themes bundled (Dracula, Nord, Catppuccin Mocha & Latte, Tokyo Night, One Dark, Rosé Pine, Gruvbox Dark, Solarized Light)
+- **Per-widget settings** - priority (Low / Normal / High), custom name override, and conditional visibility — all from a per-widget dialog opened with one click
+- **Conditional widgets** - show a widget only when another HA entity matches a condition (e.g. *washer time remaining* only while the washer is running)
+- **Secure token storage** - credentials live in OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service), never in plain text
 - **Cross-platform** - macOS, Windows, Linux
 - **Lightweight** - low CPU / memory footprint, designed to run 24/7 in background
 - **Pluggable (planned)** - Home Assistant is the first integration; plugin API for arbitrary data sources is on the roadmap
 - **Fully customizable cards and layouts** - in progress
 - **Sensor history and lightweight charts** - in progress
+
 
 ## Why Rust?
 
@@ -75,7 +78,7 @@ xattr -cr /Applications/Snapdash.app  # or where your Snapdash.app lives
 ```
 
 Or right-click the app -> **Open** -> click **Open** in the dialog.
-Either way, very the download first:
+Either way, verify the download first:
 
 ```bash
 shasum -a 256 -c snapdash-vX.Y.Z-macos-aarch64.tar.gz.sha256
@@ -88,7 +91,7 @@ brew tap schizza/tap
 brew install --cask snapdash
 ```
 
-Homebrew automatically removes the quarantione attributes and handles
+Homebrew automatically removes the quarantine attributes and handles
 updates via `brew upgrade`.
 
 ### Build from source
@@ -96,7 +99,7 @@ updates via `brew upgrade`.
 Requires **Rust 1.85** (2024 edition)
 
 ```bash
-git clone https://github/schizza/snapdash.git
+git clone https://github.com/schizza/snapdash.git
 cd snapdash
 cargo build --release
 
@@ -120,9 +123,7 @@ cargo run --release
 3. Go to **Security -> Long-Lived Access Tokens**
 4. Click **Create token**, name it (e.g. `Snapdash`), confirm
 5. Copy the token immediately - Home Assistant only shows it once.
-6. Paste it into Snapdash Settings , confirm
-7. Copy the token immediately - Home Assistant only shows it once.
-8. Paste it into Snapdash Settings -> **Home Assistant token** field.
+6. Paste it into Snapdash Settings -> **Home Assistant token** field.
 
 After saving, the token is moved to your OS keychain. The `config.json` file never contains the token.
 
@@ -141,16 +142,65 @@ If the config is corrupted, Snapdash falls back to defaults and writes a fresh f
 | **Windows** | `%APPDATA%\dev.snapdash.Snapdash\config.json` | `%APPDATA%\dev.snapdash.Snapdash\debug.log` |
 | **Linux** | `~/.config/snapdash/config.json` | `~/.local/share/snapdash/debug.log` |
 
+## Per-widget settings
+
+Every widget has its own settings dialog — opened by the **sliders icon**
+in the widget's top-right corner, or from the sliders shortcut next to
+any selected sensor in *Settings → Sensors*. The dialog has three
+sections:
+
+### Display
+Override the widget's title with your own name. Useful when HA's
+friendly_name is long or noisy (`washing_machine_time_remaining_short`
+→ simply *Washing Machine*). Empty the field to revert to HA's name.
+
+### Behavior
+Pick a **priority** for the widget:
+- **High** — accent-colored value and a steady accent ring that dips
+  briefly on each state update.
+- **Normal** — default; ring stays faint and flashes on update.
+- **Low** — value dimmed to recede visually.
+
+The three priority dots in the widget's bottom-left corner are a
+shortcut for the same setting.
+
+### Show only when…
+**Conditional visibility** — gate the widget by another HA entity's
+state, so it only appears when it's actually useful.
+
+Conditions: *state equals*, *state is not*, *is available*, *numeric >*,
+*numeric <*. The trigger can be any HA entity (including the widget's
+own sensor for self-triggering).
+
+The editor shows a live ✓ / ⚠ hint as you type the trigger entity
+(found in HA or not) and a **Currently visible / hidden** preview of
+the rule's verdict — so you can confirm the rule does what you expect
+without closing the dialog.
+
+Hidden widgets get a **Hidden by rule** pill in *Settings → Sensors*
+so they remain findable even when they're not on screen.
+
 ## Custom themes
 
-Beyond the built-in **Mac Light** and **Mac Dark**, Snapdash loads any
-JSON theme you drop into its `themes/` folder. Write your own, or grab
-a ready-made one (Dracula, Nord, Catppuccin, …) and place the file in:
+Beyond the built-in **Mac Light** and **Mac Dark**, Snapdash supports
+fully custom JSON themes in three ways:
+
+- **Browse the in-app gallery** — *Settings → Appearance → Browse* opens
+  a window with community themes you can install in one click. The
+  index is published to this repo and regenerated by CI on every theme
+  contribution.
+
+- **Import a file** — *Settings → Appearance → Import* picks a `.json`
+  via the native file dialog, validates it, and copies it into your
+  themes folder.
+
+- **Drop-in** — copy a `.json` directly into your themes folder; it's
+  scanned at startup.
 
 | OS | Themes folder |
 | --- | --- |
 | **macOS** | `~/Library/Application Support/dev.snapdash.Snapdash/themes/` |
-| **Windows** | `%APPDATA%\dev.snapdash.Snapdash\themes\` |
+| **Windows** | `%APPDATA%\dev.snapdash.Snapdash\config\themes\` |
 | **Linux** | `~/.config/snapdash/themes/` |
 
 The folder is scanned at startup; every valid `*.json` shows up in
@@ -247,15 +297,16 @@ On macOS/Windows the token only lives in the keychain. To reset: in Settings, cl
 - [X] Secure token storage in OS keychain
 - [X] Real-time state updates with pulse animations
 - [X] Multi-widget configuration via Settings
-- [X] Custom JSON themes (downloadable / user-authored)
+- [X] Custom JSON themes — drop-in, import, in-app gallery
+- [X] Per-widget priority, custom names, conditional visibility
 - [X] Cross-platform autostart
 - [X] In-app auto-update
-- [ ] Local history & 24h sparkline charts
+- [ ] Local history & 24h sparkline charts (in test right now)
 - [ ] System tray menu
 - [ ] Plugin API for non-HA data sources
 - [ ] Linux-specific window hacks (XShape rounded corners)
 - [ ] Code-signed releases (macOS notarization, Windows signing)
-- [ ] Auto-update mechanism
+
 
 See the [issue tracker](https://github.com/schizza/snapdash/issues) and [project board](https://github.com/schizza/snapdash/projects) for current work.
 
