@@ -9,6 +9,7 @@ pub mod theme;
 pub mod ui;
 pub mod update;
 pub mod widget_size;
+pub mod widget_visibility;
 
 use iced::daemon;
 

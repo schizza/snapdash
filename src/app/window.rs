@@ -71,6 +71,7 @@ pub enum WindowKind {
     Entity { entity_id: String },
     ReleaseNotes,
     ThemeGallery,
+    WidgetSettings { entity_id: String },
 }
 
 #[derive(Debug, Clone)]

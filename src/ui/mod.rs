@@ -9,3 +9,4 @@ pub mod release_notes;
 pub mod settings;
 pub mod theme;
 pub mod update_view;
+pub mod widget_settings;
