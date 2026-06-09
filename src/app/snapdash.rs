@@ -1074,7 +1074,25 @@ impl Snapdash {
                 }
 
                 if self.windows.is_empty() {
-                    iced::exit()
+                    // Stay alive if any configured widget has a
+                    // visibility rule — the next HA state change can
+                    // bring it back via update_widget_visibility. Without
+                    // this guard a rule that flips false for the last
+                    // visible widget kills the process and there's
+                    // nothing left to reopen it. Users without rules
+                    // get the original "close everything → exit"
+                    // behaviour; rule users quit via Settings → Quit.
+                    let has_rule_gated_widget = self
+                        .config
+                        .widgets
+                        .iter()
+                        .any(|w| self.config.widget_visibility.contains_key(w));
+
+                    if has_rule_gated_widget {
+                        Task::none()
+                    } else {
+                        iced::exit()
+                    }
                 } else {
                     Task::none()
                 }
