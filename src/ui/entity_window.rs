@@ -78,11 +78,19 @@ pub fn view(
 
     // Actionable widget affordance (issue #81, Phase 1). When the entity's
     // domain is one of the five MVP-supported ones (switch/light/scene/
-    // script/input_boolean), render a small accent-colored button in the
-    // widget's top-right corner. Tap → REST `call_service` to HA. Placed
-    // before the update icon so when both are present the update alert
-    // stays rightmost (matches existing priority: system health first).
-    let action_kind = ActionKind::from_entity_id(&state.entity_id);
+    // script/input_boolean) AND we're currently connected to HA, render a
+    // small accent-colored button in the widget's top-right corner. Tap →
+    // REST `call_service` to HA. Placed before the update icon so when
+    // both are present the update alert stays rightmost (matches existing
+    // priority: system health first).
+    //
+    // Hiding the button while disconnected keeps the UI honest: no dead
+    // affordance, and no way for a mid-reconnect tap to fire a REST call
+    // that would fight the WS handshake still in progress. The handler
+    // guards the same condition; this just makes the intent visible.
+    let action_kind = connected
+        .then(|| ActionKind::from_entity_id(&state.entity_id))
+        .flatten();
     let action_button: Option<Element<Message>> = action_kind.map(|action| {
         let (icon, tooltip) = match action {
             ActionKind::ToggleSwitch => (Icon::Toggle, "Toggle switch"),

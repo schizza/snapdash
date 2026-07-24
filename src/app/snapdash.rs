@@ -1334,16 +1334,24 @@ impl Snapdash {
             Message::HaEvent(ev) => self.handle_ha_event(ev),
 
             Message::WidgetActionTriggered { entity_id, action } => {
-                // Snapshot the connection so the async task doesn't need
-                // a reference to `self`. If we're not connected there's
-                // no point firing the call — mirror the status-bar
-                // feedback the widget would otherwise get from HA.
-                let Some(connection) = self.ha.connection.clone() else {
-                    self.set_status(
-                        format!("Cannot toggle {entity_id}: not connected to Home Assistant"),
-                        LogType::Warn,
-                    );
-                    return Task::none();
+                // Both flags matter here. `self.ha.connection` is `Some`
+                // for the entire reconnect cycle (the WS Subscription is
+                // keyed on it and stays set even while the socket is
+                // down); `HaEvent::Disconnected` only clears `.connected`.
+                // Guarding on the config alone would let a tap during a
+                // WS outage fire a REST request and quietly succeed —
+                // the UI would say "disconnected" while the action still
+                // ran. Require both so the "not connected" story the UI
+                // tells matches what actually happens on the wire.
+                let connection = match (self.ha.connected, self.ha.connection.clone()) {
+                    (true, Some(cfg)) => cfg,
+                    _ => {
+                        self.set_status(
+                            format!("Cannot toggle {entity_id}: not connected to Home Assistant"),
+                            LogType::Warn,
+                        );
+                        return Task::none();
+                    }
                 };
 
                 // Optimistic UI: pulse the widget immediately so the user
