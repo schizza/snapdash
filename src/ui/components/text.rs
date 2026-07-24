@@ -107,6 +107,7 @@ pub fn message<'a>(
         MessageType::Error => p.danger,
         MessageType::Warning => p.accent,
         MessageType::Success => p.success,
+        MessageType::Info => p.accent,
     };
 
     let (bg_a, b_a) = alpha;
@@ -139,6 +140,7 @@ pub fn tooltip_message<'a>(
         MessageType::Error => p.danger,
         MessageType::Warning => p.accent,
         MessageType::Success => p.success,
+        MessageType::Info => p.accent,
     };
 
     iced::widget::container(

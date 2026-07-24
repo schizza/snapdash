@@ -29,7 +29,10 @@ fn parse_f64(s: &str) -> Option<f64> {
     s.parse::<f64>().ok()
 }
 
-fn domain(entity_id: &str) -> &str {
+/// Extract the HA domain prefix (`sensor`, `light`, `switch`, …) from an
+/// entity id. Returns `""` when the id is malformed — callers use that as
+/// the "no known domain" sentinel.
+pub fn domain(entity_id: &str) -> &str {
     entity_id.split('.').next().unwrap_or("")
 }
 

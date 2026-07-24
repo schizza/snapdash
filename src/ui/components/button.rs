@@ -151,6 +151,33 @@ impl IconVisual {
             radius: 999.0,
         }
     }
+
+    /// Accent-colored variant — same shape as `danger` but tinted with
+    /// the theme accent. Used for actionable-widget corner buttons where
+    /// red would read as "error" instead of "tap to activate".
+    pub fn accent(p: Palette) -> Self {
+        Self {
+            bg: iced::Color {
+                a: 0.14,
+                ..p.accent
+            },
+            bg_hovered: iced::Color {
+                a: 0.22,
+                ..p.accent
+            },
+            bg_pressed: iced::Color {
+                a: 0.32,
+                ..p.accent
+            },
+            bg_disabled: p.card_2,
+            border: p.accent,
+            border_hovered: p.accent,
+            border_width: 0.0,
+            text: p.accent,
+            text_disabled: p.text_disabled,
+            radius: 999.0,
+        }
+    }
 }
 
 fn button_content<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -393,6 +420,7 @@ pub fn icon_button<'a>(
     color: Option<Color>,
     text_size: Option<f32>,
     on_click: Message,
+    visual: IconVisual,
 
     p: Palette,
 ) -> Element<'a, Message> {
@@ -405,7 +433,7 @@ pub fn icon_button<'a>(
     iced::widget::tooltip(
         styled_icon_button(
             i,
-            IconVisual::danger(p),
+            visual,
             Padding {
                 top: 2.0,
                 bottom: 2.0,

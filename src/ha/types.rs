@@ -29,6 +29,16 @@ pub enum HaError {
 
     #[error("failed to send: {what}")]
     SendFailed { what: &'static str },
+
+    /// A REST `call_service` (issue #81) failed. `status` is `Some` when
+    /// HA replied with a non-2xx (auth/permission/entity issues), `None`
+    /// when the request never reached HA (network, timeout, TLS…).
+    #[error("service call for {entity_id} failed{}: {message}", status.map(|s| format!(" [{s}]")).unwrap_or_default())]
+    ServiceCall {
+        entity_id: String,
+        status: Option<u16>,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -117,6 +117,20 @@ pub enum Message {
     HaUrlChanged(String),
     HaTokenDelete,
 
+    /// User tapped an actionable widget's corner button. Kicks off a
+    /// `call_service` POST to HA. See issue #81.
+    WidgetActionTriggered {
+        entity_id: String,
+        action: ha::ActionKind,
+    },
+    /// Result of the `WidgetActionTriggered` REST call. On `Ok` we
+    /// silently rely on the follow-up `state_changed` WS event to refresh
+    /// the widget; on `Err` we surface the reason in the status bar.
+    WidgetActionResult {
+        entity_id: String,
+        result: Result<(), HaError>,
+    },
+
     // UI events
     FocusMove {
         window_id: window::Id,
@@ -269,7 +283,7 @@ impl Snapdash {
             .ha
             .entities
             .values()
-            .filter(|e| e.entity_id.starts_with("sensor."))
+            .filter(|e| crate::ha::actions::is_widget_candidate(&e.entity_id))
             .map(|e| {
                 let friendly_name = e
                     .attributes
@@ -349,8 +363,10 @@ impl Snapdash {
         let (pulse, should_refresh_settings) = match self.ha.entities.get(&entity_id) {
             None => (true, true),
             Some(old) => {
-                let old_is_sensor = old.entity_id.starts_with("sensor.");
-                let new_is_sensor = new_state.entity_id.starts_with("sensor.");
+                let old_is_widget_candidate =
+                    crate::ha::actions::is_widget_candidate(&old.entity_id);
+                let new_is_widget_candidate =
+                    crate::ha::actions::is_widget_candidate(&new_state.entity_id);
 
                 let old_name = old.attributes.get("friendly_name").and_then(|v| v.as_str());
                 let new_name = new_state
@@ -360,7 +376,7 @@ impl Snapdash {
 
                 (
                     self.should_pulse(Some(old), &new_state),
-                    old_is_sensor != new_is_sensor || old_name != new_name,
+                    old_is_widget_candidate != new_is_widget_candidate || old_name != new_name,
                 )
             }
         };
@@ -400,6 +416,11 @@ impl Snapdash {
                 LogType::Warn,
             ),
             HaError::Closed => ("HA disconnected, reconnecting...".to_owned(), LogType::Info),
+            // ServiceCall errors are user-driven (issue #81 actionable
+            // widgets) and never flow through the connection health path
+            // — they're surfaced directly by the `WidgetActionResult`
+            // handler. Kept here for exhaustiveness only.
+            HaError::ServiceCall { .. } => (format!("{error}"), LogType::Error),
         }
     }
 
@@ -1311,6 +1332,63 @@ impl Snapdash {
             }
 
             Message::HaEvent(ev) => self.handle_ha_event(ev),
+
+            Message::WidgetActionTriggered { entity_id, action } => {
+                // Snapshot the connection so the async task doesn't need
+                // a reference to `self`. If we're not connected there's
+                // no point firing the call — mirror the status-bar
+                // feedback the widget would otherwise get from HA.
+                let Some(connection) = self.ha.connection.clone() else {
+                    self.set_status(
+                        format!("Cannot toggle {entity_id}: not connected to Home Assistant"),
+                        LogType::Warn,
+                    );
+                    return Task::none();
+                };
+
+                // Optimistic UI: pulse the widget immediately so the user
+                // sees "yes, I got your tap" instead of a 50–100 ms dead
+                // interval before HA's state_changed event arrives.
+                if let Some(&window_id) = self.entity_windows.get(&entity_id)
+                    && let Some(window) = self.windows.get_mut(&window_id)
+                {
+                    window.entity.pulse.trigger();
+                }
+
+                let entity_for_result = entity_id.clone();
+                Task::perform(
+                    async move {
+                        crate::ha::actions::call_service(
+                            &connection.url,
+                            &connection.token,
+                            action,
+                            &entity_id,
+                        )
+                        .await
+                    },
+                    move |result| Message::WidgetActionResult {
+                        entity_id: entity_for_result.clone(),
+                        result,
+                    },
+                )
+            }
+
+            Message::WidgetActionResult { entity_id, result } => {
+                match result {
+                    Ok(()) => {
+                        // The follow-up state_changed WS event will
+                        // refresh the widget shortly. Nothing to do here.
+                        tracing::debug!(%entity_id, "widget action acknowledged");
+                    }
+                    Err(err) => {
+                        self.set_status(
+                            format!("Failed to toggle {entity_id}: {err}"),
+                            LogType::Error,
+                        );
+                    }
+                }
+                Task::none()
+            }
 
             Message::FocusMove {
                 window_id,

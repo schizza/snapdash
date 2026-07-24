@@ -1,6 +1,7 @@
 //! Home Assistant integration: WebSocket connection, REST helpers, secure
 //! token storage, and the runtime state the rest of the app reads from.
 
+pub mod actions;
 pub mod rest;
 pub mod token;
 pub mod types;
@@ -8,6 +9,7 @@ pub mod ws;
 
 use std::collections::HashMap;
 
+pub use actions::ActionKind;
 pub use types::{EntityState, HaConnectionConfig, HaEvent};
 
 /// Runtime state for the HA integration. Owned by `Snapdash` as a single
