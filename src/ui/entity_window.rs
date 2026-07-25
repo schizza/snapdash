@@ -3,8 +3,11 @@ use iced::{Alignment, Element, Length};
 
 use super::components;
 use crate::app::{EntityWindowState, Message};
+use crate::ha::ActionKind;
 use crate::theme::{Palette, metric};
+use crate::ui::components::IconVisual;
 use crate::ui::format::format_entity_value;
+use crate::ui::icon::Icon;
 use crate::widget_size::{Priority, WidgetSize};
 
 fn format_main_value(
@@ -59,11 +62,12 @@ pub fn view(
     let (_friendly, main_opt, detail) = format_main_value(state);
 
     let update_button = components::icon_button(
-        crate::ui::icon::Icon::Download,
+        Icon::Download,
         components::tooltip_message("Update available", crate::ui::theme::MessageType::Error, p),
         Some(p.danger),
         Some(widget_settings.widget_size.title_font()),
         Message::OpenSettingsTo(crate::ui::settings::SettingsPage::Updates),
+        IconVisual::danger(p),
         p,
     );
 
@@ -72,6 +76,43 @@ pub fn view(
         .interaction(iced::mouse::Interaction::Pointer)
         .into();
 
+    // Actionable widget affordance (issue #81, Phase 1). When the entity's
+    // domain is one of the five MVP-supported ones (switch/light/scene/
+    // script/input_boolean) AND we're currently connected to HA, render a
+    // small accent-colored button in the widget's top-right corner. Tap →
+    // REST `call_service` to HA. Placed before the update icon so when
+    // both are present the update alert stays rightmost (matches existing
+    // priority: system health first).
+    //
+    // Hiding the button while disconnected keeps the UI honest: no dead
+    // affordance, and no way for a mid-reconnect tap to fire a REST call
+    // that would fight the WS handshake still in progress. The handler
+    // guards the same condition; this just makes the intent visible.
+    let action_kind = connected
+        .then(|| ActionKind::from_entity_id(&state.entity_id))
+        .flatten();
+    let action_button: Option<Element<Message>> = action_kind.map(|action| {
+        let (icon, tooltip) = match action {
+            ActionKind::ToggleSwitch => (Icon::Toggle, "Toggle switch"),
+            ActionKind::ToggleLight => (Icon::Toggle, "Toggle light"),
+            ActionKind::TriggerScene => (Icon::Play, "Activate scene"),
+            ActionKind::TriggerScript => (Icon::Play, "Run script"),
+            ActionKind::ToggleInputBoolean => (Icon::Toggle, "Toggle input"),
+        };
+        components::icon_button(
+            icon,
+            components::tooltip_message(tooltip, crate::ui::theme::MessageType::Info, p),
+            Some(p.accent),
+            Some(widget_settings.widget_size.title_font()),
+            Message::WidgetActionTriggered {
+                entity_id: state.entity_id.clone(),
+                action,
+            },
+            IconVisual::accent(p),
+            p,
+        )
+    });
+
     let title_widget = text(title)
         .size(widget_settings.widget_size.title_font())
         .style(move |_: &iced::Theme| iced::widget::text::Style {
@@ -79,6 +120,10 @@ pub fn view(
         });
 
     let mut title_text = row![column![title_widget].width(iced::Fill)];
+
+    if let Some(button) = action_button {
+        title_text = title_text.push(button);
+    }
 
     if update {
         title_text = title_text.push(update_icon)

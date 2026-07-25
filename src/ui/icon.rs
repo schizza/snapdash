@@ -20,6 +20,12 @@ pub enum Icon {
     ExternalLink,
     FolderOpen,
     Sliders,
+    /// Physical toggle-switch pictogram. Used by actionable widgets that
+    /// flip a boolean state (switch / light / input_boolean).
+    Toggle,
+    /// Play triangle. Used by actionable widgets that fire a one-shot
+    /// trigger (scene / script).
+    Play,
 }
 
 impl Icon {
@@ -38,6 +44,8 @@ impl Icon {
             Self::ExternalLink => '\u{e0b9}',
             Self::FolderOpen => '\u{e247}',
             Self::Sliders => '\u{e29a}',
+            Self::Toggle => '\u{e18c}', // toggle-right
+            Self::Play => '\u{e13c}',   // play
         }
     }
 

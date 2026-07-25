@@ -11,6 +11,10 @@ pub enum MessageType {
     Warning,
     Error,
     Success,
+    /// Neutral informational — accent color. Used for action affordances
+    /// (e.g. actionable widget tooltips) where Warning/Error/Success
+    /// would over-color a benign hint.
+    Info,
 }
 
 impl From<&ThemeKind> for UiTheme {
