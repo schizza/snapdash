@@ -10,4 +10,4 @@ mod snapdash;
 mod window;
 
 pub use snapdash::{FocusDirection, GalleryState, Message, SettingsSensor, Snapdash};
-pub use window::{EntityWindowState, WindowKind, WindowState, find_window_id};
+pub use window::{ARM_TIMEOUT, EntityWindowState, WindowKind, WindowState, find_window_id};

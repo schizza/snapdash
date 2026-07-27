@@ -86,6 +86,30 @@ pub struct EntityWindowState {
     pub last: Option<EntityState>,
     pub pulse: PulseSpring, // TODO: Replace with Animation/spring. Currently just easy "animation paramter" (0..1), později nahradit Animation/spring
     pub hovered: bool,
+    /// When this widget's confirmation gate was armed, or `None` when it
+    /// is not awaiting a confirmation (#85).
+    ///
+    /// Carries the instant rather than a flag because being armed has a
+    /// bounded life: the card shows the prompt instead of the value, and
+    /// a widget that stopped mirroring the house indefinitely is the one
+    /// failure a dashboard must not have.
+    ///
+    /// Deliberately runtime-only, never persisted. An armed widget that
+    /// survived a restart would be a loaded gun with no visible cause.
+    pub armed_at: Option<std::time::Instant>,
+}
+
+/// How long an armed widget waits before disarming itself.
+pub const ARM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl EntityWindowState {
+    /// `true` when this widget has been waiting for a confirmation
+    /// longer than [`ARM_TIMEOUT`], so it should go back to showing its
+    /// value. Never true for a widget that is not armed.
+    pub fn arm_expired(&self, now: std::time::Instant) -> bool {
+        self.armed_at
+            .is_some_and(|at| now.duration_since(at) >= ARM_TIMEOUT)
+    }
 }
 
 /// Look up the window id for a given `kind`, optionally matching on the
@@ -110,4 +134,39 @@ pub fn find_window_id(
             }
         })
         .map(|(&id, _)| id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn widget(armed_at: Option<Instant>) -> EntityWindowState {
+        EntityWindowState {
+            entity_id: "switch.pump".into(),
+            armed_at,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_widget_that_is_not_armed_never_expires() {
+        assert!(!widget(None).arm_expired(Instant::now()));
+    }
+
+    #[test]
+    fn arming_survives_its_window_and_ends_after_it() {
+        let now = Instant::now();
+        let w = widget(Some(now));
+
+        assert!(!w.arm_expired(now), "just armed");
+        assert!(
+            !w.arm_expired(now + ARM_TIMEOUT - std::time::Duration::from_millis(1)),
+            "still inside the window, the user may be deciding"
+        );
+        // The user armed the widget and walked away. Nothing else will
+        // ever answer the prompt, and until it clears the card is showing
+        // a question instead of the state of the house.
+        assert!(w.arm_expired(now + ARM_TIMEOUT));
+    }
 }

@@ -74,6 +74,12 @@ pub struct WidgetConfig {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visibility: Option<VisibilityRule>,
+    /// Require a confirmation step before the primary action fires.
+    /// Gates the action only, never the continuous controls: a slider is
+    /// continuous and reversible, so a prompt in front of every drag
+    /// would be an obstacle rather than a safeguard.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub require_confirm: bool,
 }
 
 impl WidgetConfig {
@@ -86,6 +92,10 @@ impl WidgetConfig {
 
 fn is_default_priority(p: &Priority) -> bool {
     *p == Priority::default()
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Default)]
@@ -146,6 +156,14 @@ impl Config {
 
     pub fn position(&self, entity_id: &str) -> Option<WidgetPosition> {
         self.widget_config.get(entity_id)?.position
+    }
+
+    /// Whether the primary action needs a confirmation step (#85).
+    /// Off unless the user explicitly asked for it.
+    pub fn require_confirm(&self, entity_id: &str) -> bool {
+        self.widget_config
+            .get(entity_id)
+            .is_some_and(|w| w.require_confirm)
     }
 
     pub fn visibility(&self, entity_id: &str) -> Option<&VisibilityRule> {
@@ -386,6 +404,22 @@ mod tests {
         assert_eq!(cfg.position("light.kitchen"), None);
         assert!(cfg.visibility("light.kitchen").is_none());
         assert!(cfg.widget_config.is_empty());
+    }
+
+    /// The confirmation gate is off unless explicitly enabled, and
+    /// survives a round trip through config.json (#85).
+    #[test]
+    fn require_confirm_defaults_off_and_round_trips() {
+        let mut cfg = Config::default();
+        assert!(!cfg.require_confirm("switch.pump"));
+
+        cfg.widget_mut("switch.pump").require_confirm = true;
+        assert!(cfg.require_confirm("switch.pump"));
+
+        let json = serde_json::to_value(&cfg).unwrap();
+        let reloaded: Config = serde_json::from_value(json).unwrap();
+        assert!(reloaded.require_confirm("switch.pump"));
+        assert!(!reloaded.require_confirm("switch.other"));
     }
 
     /// An un-customised widget serializes to nothing at all.

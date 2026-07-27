@@ -54,6 +54,14 @@ pub fn with_gear_overlay<'a>(
         return inner;
     }
 
+    // An armed widget is modal: the card is asking a question and the
+    // only answers are its two buttons. These layers sit on top of the
+    // card body, so leaving them up would put the priority dots and the
+    // gear directly over the confirm buttons (#85).
+    if win.entity.armed_at.is_some() {
+        return inner;
+    }
+
     let p = app.theme.palette;
 
     let gear_button = iced::widget::button(Icon::Gear.text(p))

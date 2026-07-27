@@ -117,12 +117,23 @@ pub enum Message {
     HaUrlChanged(String),
     HaTokenDelete,
 
-    /// User tapped an actionable widget's corner button. Kicks off a
-    /// `call_service` POST to HA. See issue #81.
+    /// User tapped an actionable widget's header icon. Fires the action,
+    /// or arms the widget when its confirmation gate is on. See #81.
     WidgetActionTriggered {
         entity_id: String,
         action: ha::ActionKind,
     },
+    /// Resolves an armed widget. `false` disarms it without firing (#85).
+    WidgetActionConfirmed {
+        entity_id: String,
+        confirmed: bool,
+    },
+    /// Per-widget toggle for the confirmation gate.
+    WidgetRequireConfirmToggled(String, bool),
+    /// Ticks only while some widget is armed, to disarm the ones whose
+    /// arm window ran out. A widget shows the prompt instead of its
+    /// value, so nothing else would ever take it back.
+    ArmedTick(iced::time::Instant),
     /// Result of the `WidgetActionTriggered` REST call. On `Ok` we
     /// silently rely on the follow-up `state_changed` WS event to refresh
     /// the widget; on `Err` we surface the reason in the status bar.
@@ -387,6 +398,73 @@ impl Snapdash {
         if should_refresh_settings {
             self.rebuild_settings_sensors();
         }
+    }
+
+    /// Optimistic UI: pulse the widget immediately so the user sees
+    /// "yes, I got your tap" instead of a 50-100 ms dead interval before
+    /// HA's `state_changed` event arrives.
+    fn pulse_widget(&mut self, entity_id: &str) {
+        if let Some(&window_id) = self.entity_windows.get(entity_id)
+            && let Some(window) = self.windows.get_mut(&window_id)
+        {
+            window.entity.pulse.trigger();
+        }
+    }
+
+    fn is_armed(&self, entity_id: &str) -> bool {
+        self.entity_windows
+            .get(entity_id)
+            .and_then(|id| self.windows.get(id))
+            .is_some_and(|win| win.entity.armed_at.is_some())
+    }
+
+    fn set_armed(&mut self, entity_id: &str, armed: bool) {
+        if let Some(&id) = self.entity_windows.get(entity_id)
+            && let Some(win) = self.windows.get_mut(&id)
+        {
+            win.entity.armed_at = armed.then(std::time::Instant::now);
+        }
+    }
+
+    /// The HA connection, but only while the socket is actually up.
+    ///
+    /// Both flags matter. `self.ha.connection` is `Some` for the entire
+    /// reconnect cycle (the WS Subscription is keyed on it and stays set
+    /// even while the socket is down); `HaEvent::Disconnected` only
+    /// clears `.connected`. Guarding on the config alone would let a tap
+    /// during a WS outage fire a REST request and quietly succeed, so the
+    /// UI would say "disconnected" while the action still ran.
+    fn live_connection(&self) -> Option<HaConnectionConfig> {
+        match (self.ha.connected, self.ha.connection.clone()) {
+            (true, Some(cfg)) => Some(cfg),
+            _ => None,
+        }
+    }
+
+    /// Fire-and-forget `call_service`. The widget refreshes via the
+    /// follow-up `state_changed`, so only the failure path is handled.
+    fn dispatch_action(
+        &self,
+        entity_id: String,
+        action: ha::ActionKind,
+        connection: HaConnectionConfig,
+    ) -> Task<Message> {
+        let entity_for_result = entity_id.clone();
+        Task::perform(
+            async move {
+                crate::ha::actions::call_service(
+                    &connection.url,
+                    &connection.token,
+                    action,
+                    &entity_id,
+                )
+                .await
+            },
+            move |result| Message::WidgetActionResult {
+                entity_id: entity_for_result.clone(),
+                result,
+            },
+        )
     }
 
     fn ha_error_status(error: &HaError) -> (String, LogType) {
@@ -1019,6 +1097,12 @@ impl Snapdash {
             Message::EntityHover { window, on } => {
                 if let Some(w) = self.windows.get_mut(&window) {
                     w.entity.hovered = on;
+                    // Leaving the widget answers the prompt by walking
+                    // away. The confirm buttons live inside the card, so
+                    // moving between them never crosses this boundary.
+                    if !on {
+                        w.entity.armed_at = None;
+                    }
                 }
                 Task::none()
             }
@@ -1326,51 +1410,71 @@ impl Snapdash {
             Message::HaEvent(ev) => self.handle_ha_event(ev),
 
             Message::WidgetActionTriggered { entity_id, action } => {
-                // Both flags matter here. `self.ha.connection` is `Some`
-                // for the entire reconnect cycle (the WS Subscription is
-                // keyed on it and stays set even while the socket is
-                // down); `HaEvent::Disconnected` only clears `.connected`.
-                // Guarding on the config alone would let a tap during a
-                // WS outage fire a REST request and quietly succeed —
-                // the UI would say "disconnected" while the action still
-                // ran. Require both so the "not connected" story the UI
-                // tells matches what actually happens on the wire.
-                let connection = match (self.ha.connected, self.ha.connection.clone()) {
-                    (true, Some(cfg)) => cfg,
-                    _ => {
-                        self.set_status(
-                            format!("Cannot toggle {entity_id}: not connected to Home Assistant"),
-                            LogType::Warn,
-                        );
-                        return Task::none();
-                    }
+                let Some(connection) = self.live_connection() else {
+                    self.set_status(
+                        format!("Cannot toggle {entity_id}: not connected to Home Assistant"),
+                        LogType::Warn,
+                    );
+                    return Task::none();
                 };
 
-                // Optimistic UI: pulse the widget immediately so the user
-                // sees "yes, I got your tap" instead of a 50–100 ms dead
-                // interval before HA's state_changed event arrives.
-                if let Some(&window_id) = self.entity_windows.get(&entity_id)
-                    && let Some(window) = self.windows.get_mut(&window_id)
-                {
-                    window.entity.pulse.trigger();
+                // Gated widgets take the first tap as "arm", not "fire".
+                // Nothing reaches the wire until the prompt is answered.
+                if self.config.require_confirm(&entity_id) && !self.is_armed(&entity_id) {
+                    self.set_armed(&entity_id, true);
+                    return Task::none();
                 }
 
-                let entity_for_result = entity_id.clone();
-                Task::perform(
-                    async move {
-                        crate::ha::actions::call_service(
-                            &connection.url,
-                            &connection.token,
-                            action,
-                            &entity_id,
-                        )
-                        .await
-                    },
-                    move |result| Message::WidgetActionResult {
-                        entity_id: entity_for_result.clone(),
-                        result,
-                    },
-                )
+                self.pulse_widget(&entity_id);
+                self.dispatch_action(entity_id, action, connection)
+            }
+
+            Message::WidgetActionConfirmed {
+                entity_id,
+                confirmed,
+            } => {
+                self.set_armed(&entity_id, false);
+
+                if !confirmed {
+                    return Task::none();
+                }
+
+                // Re-derive rather than carrying the action through the
+                // prompt: it is a plain domain-level toggle or trigger, so
+                // the entity id is the whole input, and the connection has
+                // to be re-checked anyway now that time has passed.
+                let Some(action) = ha::ActionKind::from_entity_id(&entity_id) else {
+                    return Task::none();
+                };
+                let Some(connection) = self.live_connection() else {
+                    self.set_status(
+                        format!("Cannot toggle {entity_id}: not connected to Home Assistant"),
+                        LogType::Warn,
+                    );
+                    return Task::none();
+                };
+
+                self.pulse_widget(&entity_id);
+                self.dispatch_action(entity_id, action, connection)
+            }
+
+            Message::WidgetRequireConfirmToggled(entity_id, on) => {
+                self.config.widget_mut(&entity_id).require_confirm = on;
+                // Turning the gate off must not leave a widget sitting
+                // armed with no prompt left to resolve it.
+                if !on {
+                    self.set_armed(&entity_id, false);
+                }
+                self.save_config()
+            }
+
+            Message::ArmedTick(now) => {
+                for win in self.windows.values_mut() {
+                    if win.entity.arm_expired(now) {
+                        win.entity.armed_at = None;
+                    }
+                }
+                Task::none()
             }
 
             Message::WidgetActionResult { entity_id, result } => {

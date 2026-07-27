@@ -2,6 +2,7 @@ use iced::widget::{column, container, mouse_area, row, space};
 use iced::{Alignment, Element, Length, window};
 
 use crate::app::{Message, Snapdash};
+use crate::ha::ActionKind;
 use crate::theme::{metric, text_size};
 use crate::ui::components::{self, settings_components};
 use crate::ui::icon::Icon;
@@ -56,7 +57,25 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id, entity_id: &'a str) -> Eleme
         p,
     );
 
-    let behavior_section = settings_components::section([priority_item], p);
+    // Only offer the gate to widgets that actually have an action to
+    // gate. On a read-only sensor the toggle would promise something the
+    // widget can never do.
+    let mut behavior_items = vec![priority_item];
+
+    if ActionKind::from_entity_id(entity_id).is_some() {
+        behavior_items.push(settings_components::item_with_toggle(
+            "Confirm before acting",
+            Some("Ask once before firing this widget's action."),
+            snap.config.require_confirm(entity_id),
+            {
+                let entity_id = entity_id.to_owned();
+                move |on: bool| Message::WidgetRequireConfirmToggled(entity_id.clone(), on)
+            },
+            p,
+        ));
+    }
+
+    let behavior_section = settings_components::section(behavior_items, p);
 
     // --- Visibility section ---
     let visibility_rule = snap.config.visibility(entity_id);

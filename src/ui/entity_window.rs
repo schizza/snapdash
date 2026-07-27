@@ -32,6 +32,61 @@ fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
         .into()
 }
 
+/// Card body for a widget awaiting confirmation (#85).
+///
+/// Replaces the value rather than floating above it, so the question
+/// stays welded to the thing being acted on instead of drifting into a
+/// detached dialog. At the Small preset there is room for a short prompt
+/// and two icons and nothing else, which is why this is terse.
+///
+/// The affirmative is red because the gate only exists for actions the
+/// user called risky; the way out is unemphasised so it does not compete.
+fn confirm_prompt<'a>(entity_id: &str, font: f32, p: Palette) -> Element<'a, Message> {
+    let confirm = |confirmed: bool| Message::WidgetActionConfirmed {
+        entity_id: entity_id.to_owned(),
+        confirmed,
+    };
+
+    let buttons = row![
+        components::icon_button(
+            Icon::Play,
+            components::tooltip_message("Confirm", crate::ui::theme::MessageType::Warning, p),
+            Some(p.danger),
+            Some(font),
+            confirm(true),
+            IconVisual::danger(p),
+            p,
+        ),
+        components::icon_button(
+            Icon::Close,
+            components::tooltip_message("Cancel", crate::ui::theme::MessageType::Info, p),
+            Some(p.text_secondary),
+            Some(font),
+            confirm(false),
+            IconVisual::neutral(p),
+            p,
+        ),
+    ]
+    .spacing(metric::GAP)
+    .align_y(Alignment::Center);
+
+    let prompt =
+        text("Confirm?")
+            .size(font)
+            .style(move |_: &iced::Theme| iced::widget::text::Style {
+                color: Some(p.text_secondary),
+            });
+
+    iced::widget::container(
+        column![prompt, buttons]
+            .spacing(metric::GAP)
+            .align_x(Alignment::Center),
+    )
+    .center_x(Length::Fill)
+    .center_y(Length::Fill)
+    .into()
+}
+
 /// Ring pulse color for the card border.
 ///
 /// Normal/Low widgets rest faint and flash to accent on a state update
@@ -76,13 +131,18 @@ pub fn view(
         .interaction(iced::mouse::Interaction::Pointer)
         .into();
 
-    // Actionable widget affordance (issue #81, Phase 1). When the entity's
-    // domain is one of the five MVP-supported ones (switch/light/scene/
-    // script/input_boolean) AND we're currently connected to HA, render a
-    // small accent-colored button in the widget's top-right corner. Tap →
-    // REST `call_service` to HA. Placed before the update icon so when
-    // both are present the update alert stays rightmost (matches existing
-    // priority: system health first).
+    // Actionable widget affordance (issue #81). When the entity's domain
+    // is one of the five supported ones (switch/light/scene/script/
+    // input_boolean) AND we're currently connected to HA, render a small
+    // accent-colored button in the header. Tap fires a REST
+    // `call_service`, or arms the widget when its confirmation gate is on
+    // (#85). Placed before the update icon so when both are present the
+    // update alert stays rightmost (matches existing priority: system
+    // health first).
+    //
+    // This is the *only* way to fire the action: the card body is the
+    // drag handle, deliberately, per
+    // `docs/adr/0001-widget-interaction-model.md`.
     //
     // Hiding the button while disconnected keeps the UI honest: no dead
     // affordance, and no way for a mid-reconnect tap to fire a REST call
@@ -181,11 +241,23 @@ pub fn view(
         inner_column = inner_column.push(title_text);
         inner_column =
             inner_column.push(space().height(widget_settings.widget_size.title_value_gap()));
-        inner_column = inner_column.push(
+        // An armed widget shows the question instead of the value. It is
+        // the one state where the card deliberately stops mirroring the
+        // house, which is why being armed is on a clock (#85).
+        let body: Element<Message> = if state.armed_at.is_some() {
+            confirm_prompt(
+                &state.entity_id,
+                widget_settings.widget_size.title_font(),
+                p,
+            )
+        } else {
             iced::widget::container(value_text)
                 .height(Length::Fill)
-                .width(Length::Fill),
-        );
+                .width(Length::Fill)
+                .into()
+        };
+
+        inner_column = inner_column.push(body);
         inner_column =
             inner_column.push(space().height(widget_settings.widget_size.value_detail_gap()));
 

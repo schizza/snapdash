@@ -90,6 +90,20 @@ impl Snapdash {
         let check_for_update =
             iced::time::every(Duration::from_hours(1)).map(|_| Message::CheckForUpdate);
 
+        // Only runs while some widget is armed. An arm window that runs
+        // out has to be closed by something, and no other event is
+        // guaranteed to arrive: the user who armed the widget may simply
+        // have walked away. Idle otherwise, like the pulse frames above.
+        let armed_expiry = if self
+            .windows
+            .values()
+            .any(|win| win.entity.armed_at.is_some())
+        {
+            iced::time::every(Duration::from_millis(250)).map(Message::ArmedTick)
+        } else {
+            Subscription::none()
+        };
+
         Subscription::batch([
             window::close_events().map(Message::WindowClosed),
             animation_frames,
@@ -97,6 +111,7 @@ impl Snapdash {
             keyboard_events,
             ha,
             check_for_update,
+            armed_expiry,
         ])
     }
 }

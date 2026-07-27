@@ -178,6 +178,24 @@ impl IconVisual {
             radius: 999.0,
         }
     }
+
+    /// Unemphasised round icon button. Pairs with `danger` or `accent`
+    /// where one choice carries the weight and the other is the way out,
+    /// so the escape hatch does not compete for attention.
+    pub fn neutral(p: Palette) -> Self {
+        Self {
+            bg: p.card_2,
+            bg_hovered: p.card,
+            bg_pressed: p.accent_tint,
+            bg_disabled: p.card_2,
+            border: p.border,
+            border_hovered: p.border_hovered,
+            border_width: 1.0,
+            text: p.text_secondary,
+            text_disabled: p.text_disabled,
+            radius: 999.0,
+        }
+    }
 }
 
 fn button_content<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
