@@ -19,7 +19,9 @@ use crate::config::{Config, WidgetPosition};
 use crate::ha::token::{self, TokenPresence};
 use crate::theme::{DEFAULT_THEME, ThemeDef, ThemeKind};
 
-use super::window::{EntityWindowState, WindowKind, WindowState, find_window_id};
+use super::window::{
+    EntityWindowState, Expansion, WindowKind, WindowState, find_window_id, lift_needed,
+};
 
 #[derive(Debug, Clone)]
 pub struct SettingsSensor {
@@ -81,6 +83,11 @@ pub struct Snapdash {
     pub sys_data: Option<SysinfoData>,
     pub sys_info: Option<SystemInfo>,
     pub iced_sys_info: Option<iced::system::Information>,
+
+    /// Locally-held values for entities the user is currently adjusting.
+    /// Consulted before any `state_changed` is applied, so a throttled
+    /// drag isn't fought by echoes that lag the user's finger.
+    pub pending: super::PendingValues,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +137,33 @@ pub enum Message {
     },
     /// Per-widget toggle for the confirmation gate.
     WidgetRequireConfirmToggled(String, bool),
+
+    /// User tapped the chevron. Collapses immediately, or asks the
+    /// platform where the window is before expanding (#87).
+    ToggleWidgetControls(String),
+    /// The measurements the expansion needs, once the platform has
+    /// answered: where the window sits and how tall its monitor is.
+    /// Either may be `None` when the platform declines to say.
+    WidgetControlsMeasured {
+        entity_id: String,
+        origin: Option<iced::Point>,
+        monitor: Option<iced::Size>,
+    },
+    /// Slider moved. Records a pending value and sends only if the
+    /// throttle window has elapsed.
+    ControlValueChanged {
+        entity_id: String,
+        value: f32,
+    },
+    /// Slider released. Always flushes the final value so an interaction
+    /// never ends on a throttled-away intermediate, and starts the
+    /// settle window.
+    ControlReleased {
+        entity_id: String,
+    },
+    /// Ticks only while a pending value is outstanding, to retire the
+    /// ones whose settle window ran out without a matching echo.
+    PendingTick(iced::time::Instant),
     /// Ticks only while some widget is armed, to disarm the ones whose
     /// arm window ran out. A widget shows the prompt instead of its
     /// value, so nothing else would ever take it back.
@@ -247,6 +281,7 @@ impl Snapdash {
             sys_info: None,
             iced_sys_info: None,
             sys_data: None,
+            pending: super::PendingValues::default(),
         }
     }
 
@@ -368,8 +403,28 @@ impl Snapdash {
         }
     }
 
+    /// The value an echo carries for whichever axis the user might be
+    /// driving, so it can be compared against what we last sent. `None`
+    /// when the entity has no continuous axis or is not reporting one.
+    fn echoed_value(state: &EntityState) -> Option<f32> {
+        ha::Capabilities::from_state(state)
+            .continuous
+            .and_then(|control| control.current)
+    }
+
     fn apply_entity_state(&mut self, new_state: EntityState) {
         let entity_id = new_state.entity_id.clone();
+
+        // Reconcile before anything renders. While an interaction is
+        // outstanding the card must keep showing the pending value:
+        // echoes lag the user's finger, so applying them here is exactly
+        // what makes a slider fight the drag. The entity store is still
+        // updated, only the *display* is held back, so the moment the
+        // pending value resolves or expires there is real state to fall
+        // back to. See `docs/adr/0002-pending-values-and-settle-window.md`.
+        let ha_driven = self
+            .pending
+            .reconcile(&entity_id, Self::echoed_value(&new_state));
 
         let (pulse, should_refresh_settings) = match self.ha.entities.get(&entity_id) {
             None => (true, true),
@@ -392,7 +447,9 @@ impl Snapdash {
             }
         };
 
-        self.set_window_entity_state(&entity_id, &new_state, pulse);
+        if ha_driven {
+            self.set_window_entity_state(&entity_id, &new_state, pulse);
+        }
         self.ha.entities.insert(entity_id, new_state);
 
         if should_refresh_settings {
@@ -439,6 +496,77 @@ impl Snapdash {
             (true, Some(cfg)) => Some(cfg),
             _ => None,
         }
+    }
+
+    /// The continuous control an entity currently exposes, if any.
+    fn control_for(&self, entity_id: &str) -> Option<ha::ContinuousControl> {
+        self.ha
+            .entities
+            .get(entity_id)
+            .map(ha::Capabilities::from_state)
+            .and_then(|caps| caps.continuous)
+    }
+
+    /// Turn a raw slider value into the right service call for whichever
+    /// axis the entity exposes, then dispatch it.
+    fn send_continuous(
+        &self,
+        entity_id: &str,
+        value: f32,
+        connection: HaConnectionConfig,
+    ) -> Task<Message> {
+        let Some(control) = self.control_for(entity_id) else {
+            return Task::none();
+        };
+
+        self.dispatch_action(entity_id.to_owned(), control.action(value), connection)
+    }
+
+    /// Put an expanded widget back at its preset size and, when it had
+    /// been lifted to make room, back where it started.
+    fn collapse_widget(&mut self, entity_id: &str) -> Task<Message> {
+        let Some(&id) = self.entity_windows.get(entity_id) else {
+            return Task::none();
+        };
+        let Some(win) = self.windows.get_mut(&id) else {
+            return Task::none();
+        };
+        let Some(expansion) = win.entity.expansion.take() else {
+            return Task::none();
+        };
+        // The move below is ours, not the user's, so it must not be
+        // mistaken for them repositioning the widget.
+        win.entity.ignore_next_move = expansion.lifted_by > 0.0;
+
+        // The pending value belongs to the interaction, and the
+        // interaction just ended. Keeping it would leave the card showing
+        // a number HA never confirmed with no control left to correct it.
+        self.pending.clear(entity_id);
+
+        // Through the platform helper, so Linux keeps its SHADOW_MARGIN
+        // inflation. Resizing with the raw card size would clip the
+        // drawn shadow, the same trap `WidgetSizeChanged` documents.
+        let base = self.config.widget_settings.widget_size.window_size();
+        let resize = iced::window::resize::<Message>(
+            id,
+            crate::ui::platform::window_size(base.width, base.height),
+        );
+
+        if expansion.lifted_by <= 0.0 {
+            return resize;
+        }
+
+        // Give the lift back relative to wherever the widget is *now*,
+        // not where it was when it expanded: the user may have dragged it
+        // in the meantime, and that drag is theirs to keep.
+        let lifted_by = expansion.lifted_by;
+        resize.chain(iced::window::position(id).then(move |origin| match origin {
+            Some(origin) => iced::window::move_to::<Message>(
+                id,
+                iced::Point::new(origin.x, origin.y + lifted_by),
+            ),
+            None => Task::none(),
+        }))
     }
 
     /// Fire-and-forget `call_service`. The widget refreshes via the
@@ -914,12 +1042,28 @@ impl Snapdash {
                 let card = size.window_size();
                 let surface = crate::ui::platform::window_size(card.width, card.height);
 
-                let mut tasks: Vec<Task<Message>> = self
+                // Collapse anything currently expanded first. The resize
+                // below would otherwise silently overwrite its grown
+                // height, leaving the widget at preset size with its
+                // controls still rendered and its lift never given back.
+                let expanded: Vec<String> = self
                     .windows
-                    .iter()
-                    .filter(|(_id, win)| matches!(win.kind, WindowKind::Entity { .. }))
-                    .map(|(id, _win)| iced::window::resize::<Message>(*id, surface))
+                    .values()
+                    .filter(|win| win.entity.is_expanded())
+                    .map(|win| win.entity.entity_id.clone())
                     .collect();
+
+                let mut tasks: Vec<Task<Message>> = expanded
+                    .iter()
+                    .map(|entity_id| self.collapse_widget(entity_id))
+                    .collect();
+
+                tasks.extend(
+                    self.windows
+                        .iter()
+                        .filter(|(_id, win)| matches!(win.kind, WindowKind::Entity { .. }))
+                        .map(|(id, _win)| iced::window::resize::<Message>(*id, surface)),
+                );
 
                 tasks.push(self.save_config());
                 Task::batch(tasks)
@@ -1168,6 +1312,12 @@ impl Snapdash {
                 {
                     self.entity_windows.remove(&entity_id);
                     self.entity_windows_opening.remove(&entity_id);
+                    // No card left to render the pending value, and no
+                    // control left to resolve it. Leaving it behind would
+                    // keep the settle-window subscription awake and make
+                    // the widget reopen showing a number HA never
+                    // confirmed.
+                    self.pending.clear(&entity_id);
                 }
 
                 if self.windows.is_empty() {
@@ -1443,7 +1593,7 @@ impl Snapdash {
                 // prompt: it is a plain domain-level toggle or trigger, so
                 // the entity id is the whole input, and the connection has
                 // to be re-checked anyway now that time has passed.
-                let Some(action) = ha::ActionKind::from_entity_id(&entity_id) else {
+                let Some(action) = ha::ActionKind::primary_for_entity(&entity_id) else {
                     return Task::none();
                 };
                 let Some(connection) = self.live_connection() else {
@@ -1466,6 +1616,131 @@ impl Snapdash {
                     self.set_armed(&entity_id, false);
                 }
                 self.save_config()
+            }
+
+            Message::ToggleWidgetControls(entity_id) => {
+                if self
+                    .entity_windows
+                    .get(&entity_id)
+                    .and_then(|id| self.windows.get(id))
+                    .is_some_and(|win| win.entity.is_expanded())
+                {
+                    return self.collapse_widget(&entity_id);
+                }
+
+                let Some(&id) = self.entity_windows.get(&entity_id) else {
+                    return Task::none();
+                };
+
+                // Where the window sits and how tall its monitor is are
+                // both platform questions, so the expansion cannot be
+                // decided synchronously. Ask, then act on the answers.
+                iced::window::position(id).then(move |origin| {
+                    let entity_id = entity_id.clone();
+                    iced::window::monitor_size(id).map(move |monitor| {
+                        Message::WidgetControlsMeasured {
+                            entity_id: entity_id.clone(),
+                            origin,
+                            monitor,
+                        }
+                    })
+                })
+            }
+
+            Message::WidgetControlsMeasured {
+                entity_id,
+                origin,
+                monitor,
+            } => {
+                let Some(&id) = self.entity_windows.get(&entity_id) else {
+                    return Task::none();
+                };
+                // Nothing to reveal means nothing to grow into.
+                if self.control_for(&entity_id).is_none() {
+                    return Task::none();
+                }
+
+                let size = self.config.widget_settings.widget_size;
+                let base = size.window_size();
+                let grown_by = size.controls_height(1);
+
+                // Without a reported position there is no way to tell
+                // whether the widget is near an edge, so it grows
+                // downwards. Same fallback as an unknown monitor.
+                let lifted_by = origin.map_or(0.0, |origin| {
+                    lift_needed(origin.y, base.height, grown_by, monitor.map(|m| m.height))
+                });
+
+                let Some(win) = self.windows.get_mut(&id) else {
+                    return Task::none();
+                };
+                win.entity.expansion = Some(Expansion {
+                    grown_by,
+                    lifted_by,
+                });
+                win.entity.ignore_next_move = lifted_by > 0.0;
+
+                let grow = iced::window::resize::<Message>(
+                    id,
+                    crate::ui::platform::window_size(base.width, base.height + grown_by),
+                );
+
+                match (lifted_by > 0.0, origin) {
+                    (true, Some(origin)) => iced::window::move_to::<Message>(
+                        id,
+                        iced::Point::new(origin.x, origin.y - lifted_by),
+                    )
+                    .chain(grow),
+                    _ => grow,
+                }
+            }
+
+            Message::ControlValueChanged { entity_id, value } => {
+                let Some(connection) = self.live_connection() else {
+                    self.set_status(
+                        format!("Cannot adjust {entity_id}: not connected to Home Assistant"),
+                        LogType::Warn,
+                    );
+                    return Task::none();
+                };
+
+                // `set` returns None when the throttle window swallows
+                // this move. The value is not lost: it stays in `shown`,
+                // and `ControlReleased` always flushes the final one.
+                let Some(value) = self
+                    .pending
+                    .set(&entity_id, value, std::time::Instant::now())
+                else {
+                    return Task::none();
+                };
+
+                self.send_continuous(&entity_id, value, connection)
+            }
+
+            Message::ControlReleased { entity_id } => {
+                let Some(connection) = self.live_connection() else {
+                    return Task::none();
+                };
+                let Some(value) = self.pending.release(&entity_id, std::time::Instant::now())
+                else {
+                    return Task::none();
+                };
+
+                self.send_continuous(&entity_id, value, connection)
+            }
+
+            Message::PendingTick(now) => {
+                // A widget that just lost its pending value is still
+                // showing that local number, and nothing else will
+                // correct it: in exactly the case the timeout exists for,
+                // HA has gone quiet. So push the last known truth back
+                // onto each retired widget by hand.
+                for entity_id in self.pending.expire(now) {
+                    if let Some(state) = self.ha.entities.get(&entity_id).cloned() {
+                        self.set_window_entity_state(&entity_id, &state, false);
+                    }
+                }
+                Task::none()
             }
 
             Message::ArmedTick(now) => {
@@ -1556,9 +1831,20 @@ impl Snapdash {
             }
 
             Message::WidgetMoved { id, position } => {
-                let Some(window) = self.windows.get(&id) else {
+                let Some(window) = self.windows.get_mut(&id) else {
                     return Task::none();
                 };
+
+                // Expanding near the bottom edge lifts the window, and
+                // collapsing puts it back. Those are ours, not the user
+                // repositioning their widget, so they must not reach
+                // config.json: otherwise a widget would climb the screen
+                // a little further every time it was opened (#87).
+                if window.entity.ignore_next_move {
+                    window.entity.ignore_next_move = false;
+                    return Task::none();
+                }
+
                 let WindowKind::Entity { entity_id } = &window.kind else {
                     return Task::none();
                 };

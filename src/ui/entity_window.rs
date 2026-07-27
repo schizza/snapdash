@@ -3,7 +3,7 @@ use iced::{Alignment, Element, Length};
 
 use super::components;
 use crate::app::{EntityWindowState, Message};
-use crate::ha::ActionKind;
+use crate::ha::{ActionKind, ContinuousControl, ContinuousKind};
 use crate::theme::{Palette, metric};
 use crate::ui::components::IconVisual;
 use crate::ui::format::format_entity_value;
@@ -87,6 +87,90 @@ fn confirm_prompt<'a>(entity_id: &str, font: f32, p: Palette) -> Element<'a, Mes
     .into()
 }
 
+/// Human-facing value for the current slider position.
+///
+/// Brightness is stored 0-255 on the wire but means nothing to a user in
+/// those units, so it reads as a percentage. Position is already a
+/// percentage. A setpoint keeps its own scale, and its step decides
+/// whether a decimal is worth showing.
+fn readout(control: &ContinuousControl, value: f32) -> String {
+    match control.kind {
+        ContinuousKind::Brightness => {
+            let pct = (value / control.max * 100.0).round();
+            format!("{pct:.0}%")
+        }
+        ContinuousKind::Position => format!("{:.0}%", value.round()),
+        ContinuousKind::Temperature => {
+            if control.step < 1.0 {
+                format!("{value:.1}°")
+            } else {
+                format!("{value:.0}°")
+            }
+        }
+    }
+}
+
+fn axis_label(kind: ContinuousKind) -> &'static str {
+    match kind {
+        ContinuousKind::Brightness => "Brightness",
+        ContinuousKind::Temperature => "Target",
+        ContinuousKind::Position => "Position",
+    }
+}
+
+/// One axis inside an expanded widget: a label with its readout, and the
+/// slider beneath.
+///
+/// The slider renders the *pending* value whenever the user is driving
+/// it, falling back to what HA reported once the interaction reconciles.
+/// Falling back to `min` keeps the slider in range for an entity that
+/// reports no value at all, such as an unavailable light with no
+/// brightness. See `crate::app::pending`.
+fn control_row<'a>(
+    entity_id: &str,
+    control: &ContinuousControl,
+    pending: Option<f32>,
+    font: f32,
+    p: Palette,
+) -> Element<'a, Message> {
+    let value = pending
+        .or(control.current)
+        .unwrap_or(control.min)
+        .clamp(control.min, control.max);
+
+    let label = text(axis_label(control.kind))
+        .size(font)
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(p.text_dim),
+        });
+
+    let value_text = text(readout(control, value))
+        .size(font)
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(p.text_secondary),
+        });
+
+    let bar = iced::widget::slider(control.min..=control.max, value, {
+        let entity_id = entity_id.to_owned();
+        move |value: f32| Message::ControlValueChanged {
+            entity_id: entity_id.clone(),
+            value,
+        }
+    })
+    .step(control.step)
+    .on_release(Message::ControlReleased {
+        entity_id: entity_id.to_owned(),
+    });
+
+    column![
+        row![label, space().width(Length::Fill), value_text].align_y(Alignment::Center),
+        bar,
+    ]
+    .spacing(4)
+    .width(Length::Fill)
+    .into()
+}
+
 /// Ring pulse color for the card border.
 ///
 /// Normal/Low widgets rest faint and flash to accent on a state update
@@ -105,15 +189,40 @@ fn pulse_border(p: Palette, pulse: f32, priority: Priority) -> iced::Color {
     iced::Color { a, ..p.accent }
 }
 
-pub fn view(
-    state: &EntityWindowState,
-    p: Palette,
-    connected: bool,
-    update: bool,
-    widget_settings: crate::config::WidgetSettings,
-    priority: Priority,
-    title: String,
-) -> Element<'_, Message> {
+/// Everything the widget card needs to render itself.
+///
+/// Bundled rather than passed as a parameter list because the card grew
+/// past what a positional signature can carry legibly once the expand
+/// chevron and its controls arrived, and every future axis adds more.
+pub struct WidgetView<'a> {
+    pub state: &'a EntityWindowState,
+    pub palette: Palette,
+    pub connected: bool,
+    pub update_available: bool,
+    pub settings: crate::config::WidgetSettings,
+    pub priority: Priority,
+    pub title: String,
+    /// The axis this entity exposes, when it has one. Its presence is
+    /// what earns the widget its expand chevron.
+    pub control: Option<ContinuousControl>,
+    /// Locally-held value while the user is driving the control, which
+    /// wins over the value HA last reported.
+    pub pending: Option<f32>,
+}
+
+pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
+    let WidgetView {
+        state,
+        palette: p,
+        connected,
+        update_available: update,
+        settings: widget_settings,
+        priority,
+        title,
+        control,
+        pending,
+    } = ctx;
+
     let (_friendly, main_opt, detail) = format_main_value(state);
 
     let update_button = components::icon_button(
@@ -149,17 +258,23 @@ pub fn view(
     // that would fight the WS handshake still in progress. The handler
     // guards the same condition; this just makes the intent visible.
     let action_kind = connected
-        .then(|| ActionKind::from_entity_id(&state.entity_id))
+        .then(|| ActionKind::primary_for_entity(&state.entity_id))
         .flatten();
-    let action_button: Option<Element<Message>> = action_kind.map(|action| {
+    let action_button: Option<Element<Message>> = action_kind.and_then(|action| {
         let (icon, tooltip) = match action {
             ActionKind::ToggleSwitch => (Icon::Toggle, "Toggle switch"),
             ActionKind::ToggleLight => (Icon::Toggle, "Toggle light"),
             ActionKind::TriggerScene => (Icon::Play, "Activate scene"),
             ActionKind::TriggerScript => (Icon::Play, "Run script"),
             ActionKind::ToggleInputBoolean => (Icon::Toggle, "Toggle input"),
+            // Value-carrying actions are built from a control, never
+            // from an entity id, so `primary_for_entity` cannot hand one
+            // back here and there is no header affordance for them.
+            ActionKind::SetBrightness(_)
+            | ActionKind::SetTemperature(_)
+            | ActionKind::SetPosition(_) => return None,
         };
-        components::icon_button(
+        Some(components::icon_button(
             icon,
             components::tooltip_message(tooltip, crate::ui::theme::MessageType::Info, p),
             Some(p.accent),
@@ -170,7 +285,7 @@ pub fn view(
             },
             IconVisual::accent(p),
             p,
-        )
+        ))
     });
 
     let title_widget = text(title)
@@ -183,6 +298,29 @@ pub fn view(
 
     if let Some(button) = action_button {
         title_text = title_text.push(button);
+    }
+
+    // The expand chevron, next to the action icon (#87). Both stay
+    // visible at rest: the action icon is the signal that this widget
+    // does something, and the chevron the signal that it has a value
+    // worth adjusting. Gated on `connected` for the same reason the
+    // action is, a control that cannot reach HA would swallow drags.
+    if control.is_some() && connected {
+        let (icon, tooltip) = if state.is_expanded() {
+            (Icon::ChevronUp, "Hide controls")
+        } else {
+            (Icon::ChevronDown, "Adjust value")
+        };
+
+        title_text = title_text.push(components::icon_button(
+            icon,
+            components::tooltip_message(tooltip, crate::ui::theme::MessageType::Info, p),
+            Some(p.accent),
+            Some(widget_settings.widget_size.title_font()),
+            Message::ToggleWidgetControls(state.entity_id.clone()),
+            IconVisual::accent(p),
+            p,
+        ));
     }
 
     if update {
@@ -277,6 +415,22 @@ pub fn view(
 
         //        inner_column = inner_column.push(detail_line);
         inner_column = inner_column.push(status_line);
+
+        // The controls sit below the status line, in the height the
+        // window grew by. They are part of the widget rather than a
+        // window of their own, so they cannot drift away from the value
+        // they belong to (#87).
+        if let (true, Some(control)) = (state.is_expanded(), control.as_ref()) {
+            inner_column =
+                inner_column.push(space().height(widget_settings.widget_size.value_detail_gap()));
+            inner_column = inner_column.push(control_row(
+                &state.entity_id,
+                control,
+                pending,
+                widget_settings.widget_size.detail_font(),
+                p,
+            ));
+        }
 
         inner_column
     };

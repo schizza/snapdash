@@ -104,6 +104,16 @@ impl Snapdash {
             Subscription::none()
         };
 
+        // Only runs while a pending value is outstanding. A settle window
+        // that expires without a matching echo has to be retired by
+        // *something*, and no other event is guaranteed to arrive: the
+        // whole point of the timeout is that HA went quiet.
+        let pending_expiry = if self.pending.is_empty() {
+            Subscription::none()
+        } else {
+            iced::time::every(Duration::from_millis(250)).map(Message::PendingTick)
+        };
+
         Subscription::batch([
             window::close_events().map(Message::WindowClosed),
             animation_frames,
@@ -112,6 +122,7 @@ impl Snapdash {
             ha,
             check_for_update,
             armed_expiry,
+            pending_expiry,
         ])
     }
 }

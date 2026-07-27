@@ -146,6 +146,26 @@ impl WidgetSize {
             Self::Large => 10.0,
         }
     }
+
+    /// Height one continuous control adds to an expanded widget (#87):
+    /// a label with its readout, and the slider under it.
+    pub fn control_row_height(self) -> f32 {
+        match self {
+            Self::Small => 40.0,
+            Self::Normal => 44.0,
+            Self::Large => 50.0,
+        }
+    }
+
+    /// Total height the controls area adds for `axes` controls, or `0.0`
+    /// when the entity has none to show.
+    pub fn controls_height(self, axes: usize) -> f32 {
+        if axes == 0 {
+            return 0.0;
+        }
+        // One separating gap above the block, then the rows themselves.
+        self.value_detail_gap() + self.control_row_height() * axes as f32
+    }
 }
 
 #[cfg(test)]

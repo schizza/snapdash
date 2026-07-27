@@ -62,7 +62,7 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id, entity_id: &'a str) -> Eleme
     // widget can never do.
     let mut behavior_items = vec![priority_item];
 
-    if ActionKind::from_entity_id(entity_id).is_some() {
+    if ActionKind::primary_for_entity(entity_id).is_some() {
         behavior_items.push(settings_components::item_with_toggle(
             "Confirm before acting",
             Some("Ask once before firing this widget's action."),
