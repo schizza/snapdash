@@ -4,11 +4,11 @@
 //! opening Home Assistant. This module owns two separate concerns that
 //! phase 1 was able to conflate and phase 2 cannot:
 //!
-//! - **Discovery** — [`Capabilities`], "what can this entity do?".
+//! - **Discovery** - [`Capabilities`], "what can this entity do?".
 //!   Answered from the entity's *attributes*, because the domain alone
 //!   does not know it: not every `light` is dimmable and not every
 //!   `cover` can be positioned.
-//! - **Invocation** — [`ActionKind`], "what do I send?". A concrete
+//! - **Invocation** - [`ActionKind`], "what do I send?". A concrete
 //!   service call, optionally carrying a value.
 //!
 //! ## Why REST and not the existing WebSocket?
@@ -49,7 +49,7 @@ const WIDGET_DOMAINS: &[&str] = &[
 ///
 /// Previously every call constructed `reqwest::Client::new()`, which
 /// builds a fresh connection pool and therefore paid for a new TCP and
-/// TLS handshake per tap. That per-call cost — not HTTP itself — was
+/// TLS handshake per tap. That per-call cost - not HTTP itself - was
 /// what made a WebSocket migration look necessary for phase 2. `Client`
 /// is internally `Arc`'d and explicitly designed to be reused.
 static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
@@ -65,18 +65,20 @@ fn http() -> &'static reqwest::Client {
 /// because every payload is a scalar.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ActionKind {
-    /// `switch.toggle` — HA flips it based on current state.
+    /// `switch.toggle` - HA flips it based on current state.
     ToggleSwitch,
-    /// `light.toggle` — on/off only, no brightness or color.
+    /// `light.toggle` - on/off only, no brightness or color.
     ToggleLight,
-    /// `scene.turn_on` — a scene is stateless: "activate this scene".
+    /// `scene.turn_on` - a scene is stateless: "activate this scene".
     TriggerScene,
-    /// `script.turn_on` — starts the script from the top.
+    /// `script.turn_on` - starts the script from the top.
     TriggerScript,
-    /// `input_boolean.toggle` — HA's user-defined boolean helper.
+    /// `input_boolean.toggle` - HA's user-defined boolean helper.
     ToggleInputBoolean,
     /// `light.turn_on` with `brightness` (0-255).
     SetBrightness(u8),
+    /// `light.turn_on` with `color_temp_kelvin`.
+    SetColorTemp(u32),
     /// `climate.set_temperature` with `temperature`.
     SetTemperature(f32),
     /// `cover.set_cover_position` with `position` (0-100).
@@ -87,7 +89,7 @@ pub enum ActionKind {
 /// parameters beyond `entity_id`.
 ///
 /// Kept as a single value so the whole mapping lives in one auditable
-/// place — `wire_mapping_is_stable` asserts against it, and any change
+/// place - `wire_mapping_is_stable` asserts against it, and any change
 /// here changes what Snapdash puts on the wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServiceCall {
@@ -107,6 +109,11 @@ impl ActionKind {
             Self::TriggerScript => ("script", "turn_on", vec![]),
             Self::ToggleInputBoolean => ("input_boolean", "toggle", vec![]),
             Self::SetBrightness(v) => ("light", "turn_on", vec![("brightness", Value::from(v))]),
+            Self::SetColorTemp(v) => (
+                "light",
+                "turn_on",
+                vec![("color_temp_kelvin", Value::from(v))],
+            ),
             Self::SetTemperature(v) => (
                 "climate",
                 "set_temperature",
@@ -126,8 +133,8 @@ impl ActionKind {
         }
     }
 
-    /// The zero-argument action a widget fires when its value area is
-    /// tapped, or `None` for entities that only display.
+    /// The zero-argument action a widget fires from its header icon, or
+    /// `None` for entities that only display.
     ///
     /// Derivable from the entity id alone, unlike [`ContinuousControl`],
     /// because every primary action is a plain domain-level toggle or
@@ -146,9 +153,11 @@ impl ActionKind {
 
 /// Which dimension a [`ContinuousControl`] adjusts. Determines the
 /// action built on release and how the value is presented.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContinuousKind {
     Brightness,
+    /// White colour temperature of a light, in kelvin.
+    ColorTemp,
     Temperature,
     Position,
 }
@@ -175,6 +184,7 @@ impl ContinuousControl {
         let clamped = value.clamp(self.min, self.max);
         match self.kind {
             ContinuousKind::Brightness => ActionKind::SetBrightness(clamped as u8),
+            ContinuousKind::ColorTemp => ActionKind::SetColorTemp(clamped as u32),
             ContinuousKind::Temperature => ActionKind::SetTemperature(clamped),
             ContinuousKind::Position => ActionKind::SetPosition(clamped as u8),
         }
@@ -184,23 +194,29 @@ impl ContinuousControl {
 /// What an entity supports, discovered from its current state.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Capabilities {
-    /// Fired by a tap on the widget's value area.
+    /// Fired by the widget's header icon.
     pub primary: Option<ActionKind>,
-    /// Adjusted from the popover, when the entity has such a dimension.
-    pub continuous: Option<ContinuousControl>,
+    /// Every axis the entity exposes, adjusted from the expanded widget.
+    /// Empty for an entity with nothing to set.
+    pub continuous: Vec<ContinuousControl>,
 }
 
 impl Capabilities {
     pub fn from_state(state: &EntityState) -> Self {
         Self {
             primary: ActionKind::primary_for_entity(&state.entity_id),
-            continuous: continuous_control(state),
+            continuous: continuous_controls(state),
         }
+    }
+
+    /// The axis of a given kind, when the entity has one.
+    pub fn axis(&self, kind: ContinuousKind) -> Option<&ContinuousControl> {
+        self.continuous.iter().find(|c| c.kind == kind)
     }
 
     /// `true` when the entity can only be displayed, never acted on.
     pub fn is_display_only(&self) -> bool {
-        self.primary.is_none() && self.continuous.is_none()
+        self.primary.is_none() && self.continuous.is_empty()
     }
 }
 
@@ -235,39 +251,91 @@ fn light_is_dimmable(state: &EntityState) -> bool {
         .any(|m| !matches!(m, "onoff" | "unknown"))
 }
 
-fn continuous_control(state: &EntityState) -> Option<ContinuousControl> {
+/// A light supports white colour temperature when it advertises the
+/// `color_temp` colour mode.
+///
+/// `color_temp_kelvin` is `null` whenever the light is currently in some
+/// other mode, so the axis is offered on the strength of what the device
+/// *supports*, and the slider simply starts at its minimum until the
+/// light is put into that mode.
+fn light_has_color_temp(state: &EntityState) -> bool {
+    let Some(Value::Array(modes)) = state.attributes.get("supported_color_modes") else {
+        return false;
+    };
+
+    modes
+        .iter()
+        .filter_map(Value::as_str)
+        .any(|m| m == "color_temp")
+}
+
+/// Every axis an entity exposes, in the order they should be shown.
+///
+/// A light can carry more than one, which is why this returns a list.
+/// Each axis reconciles independently, but they share one send throttle
+/// per entity, so the peak call rate does not grow with the axis count
+/// (`docs/adr/0003-service-calls-stay-on-rest.md`).
+fn continuous_controls(state: &EntityState) -> Vec<ContinuousControl> {
+    let mut controls = Vec::new();
+
     match domain(&state.entity_id) {
-        "light" if light_is_dimmable(state) => Some(ContinuousControl {
-            kind: ContinuousKind::Brightness,
-            min: 0.0,
-            max: 255.0,
-            step: 1.0,
-            current: attr_f32(state, "brightness"),
-        }),
+        "light" => {
+            if light_is_dimmable(state) {
+                controls.push(ContinuousControl {
+                    kind: ContinuousKind::Brightness,
+                    min: 0.0,
+                    max: 255.0,
+                    step: 1.0,
+                    current: attr_f32(state, "brightness"),
+                });
+            }
+
+            if light_has_color_temp(state) {
+                // Ranges are per-device. The fallbacks are HA's own
+                // defaults for a light that reports the mode but not its
+                // limits, which some integrations do.
+                controls.push(ContinuousControl {
+                    kind: ContinuousKind::ColorTemp,
+                    min: attr_f32(state, "min_color_temp_kelvin").unwrap_or(2000.0),
+                    max: attr_f32(state, "max_color_temp_kelvin").unwrap_or(6535.0),
+                    // Kelvin spans thousands, so a 1 K step would be a
+                    // slider with several thousand stops and no visible
+                    // difference between neighbours.
+                    step: 50.0,
+                    current: attr_f32(state, "color_temp_kelvin"),
+                });
+            }
+        }
 
         // ClimateEntityFeature.TARGET_TEMPERATURE == 1. Without it the
         // entity has no single setpoint to drag (it may be a range-only
-        // thermostat, which phase 2 does not cover).
-        "climate" if supported_features(state) & 1 != 0 => Some(ContinuousControl {
-            kind: ContinuousKind::Temperature,
-            min: attr_f32(state, "min_temp").unwrap_or(7.0),
-            max: attr_f32(state, "max_temp").unwrap_or(35.0),
-            step: attr_f32(state, "target_temp_step").unwrap_or(0.5),
-            current: attr_f32(state, "temperature"),
-        }),
+        // thermostat, which is not covered).
+        "climate" if supported_features(state) & 1 != 0 => {
+            controls.push(ContinuousControl {
+                kind: ContinuousKind::Temperature,
+                min: attr_f32(state, "min_temp").unwrap_or(7.0),
+                max: attr_f32(state, "max_temp").unwrap_or(35.0),
+                step: attr_f32(state, "target_temp_step").unwrap_or(0.5),
+                current: attr_f32(state, "temperature"),
+            });
+        }
 
         // CoverEntityFeature.SET_POSITION == 4. Open/close-only covers
         // report 1|2 but not 4 and get no slider.
-        "cover" if supported_features(state) & 4 != 0 => Some(ContinuousControl {
-            kind: ContinuousKind::Position,
-            min: 0.0,
-            max: 100.0,
-            step: 1.0,
-            current: attr_f32(state, "current_position"),
-        }),
+        "cover" if supported_features(state) & 4 != 0 => {
+            controls.push(ContinuousControl {
+                kind: ContinuousKind::Position,
+                min: 0.0,
+                max: 100.0,
+                step: 1.0,
+                current: attr_f32(state, "current_position"),
+            });
+        }
 
-        _ => None,
+        _ => {}
     }
+
+    controls
 }
 
 /// Whether an entity is eligible to appear in the Settings widget
@@ -383,7 +451,7 @@ mod tests {
         // Missing domain (no dot).
         assert_eq!(ActionKind::primary_for_entity("just_a_name"), None);
         assert_eq!(ActionKind::primary_for_entity(""), None);
-        // Wrong-case domain — HA IDs are always lowercase, we don't try to normalize.
+        // Wrong-case domain - HA IDs are always lowercase, we don't try to normalize.
         assert_eq!(ActionKind::primary_for_entity("Switch.kitchen"), None);
     }
 
@@ -399,11 +467,11 @@ mod tests {
         assert!(is_widget_candidate("script.morning"));
         assert!(is_widget_candidate("input_boolean.guest_mode"));
         // Continuous-control domains (#87). Candidates regardless of
-        // whether the individual device supports a setpoint or position —
+        // whether the individual device supports a setpoint or position -
         // their state is worth displaying either way.
         assert!(is_widget_candidate("climate.thermostat"));
         assert!(is_widget_candidate("cover.blinds"));
-        // Still out of scope — no phase 2 control surface for media.
+        // Still out of scope - no phase 2 control surface for media.
         assert!(!is_widget_candidate("media_player.living_tv"));
         // Malformed.
         assert!(!is_widget_candidate("no_dot_here"));
@@ -412,7 +480,7 @@ mod tests {
 
     #[test]
     fn wire_mapping_is_stable() {
-        // Any change here means the on-wire call to HA changes shape —
+        // Any change here means the on-wire call to HA changes shape -
         // bump deliberately.
         let call = |a: ActionKind| {
             let c = a.service_call();
@@ -446,6 +514,13 @@ mod tests {
             call(ActionKind::SetPosition(60)),
             ("cover", "set_cover_position", vec![("position", json!(60))])
         );
+        // Kelvin, not mireds. HA accepts both but `color_temp` (mireds)
+        // is deprecated, and the two are inverse scales, so sending the
+        // wrong key would drive the slider backwards.
+        assert_eq!(
+            call(ActionKind::SetColorTemp(3000)),
+            ("light", "turn_on", vec![("color_temp_kelvin", json!(3000))])
+        );
     }
 
     #[test]
@@ -457,27 +532,78 @@ mod tests {
         let caps = Capabilities::from_state(&s);
 
         assert_eq!(caps.primary, Some(ActionKind::ToggleLight));
-        let c = caps.continuous.expect("dimmable light has a control");
-        assert_eq!(c.kind, ContinuousKind::Brightness);
+        let c = caps
+            .axis(ContinuousKind::Brightness)
+            .expect("dimmable light has a brightness axis");
         assert_eq!((c.min, c.max), (0.0, 255.0));
         assert_eq!(c.current, Some(128.0));
+        // Brightness alone: this bulb advertises no colour temperature.
+        assert_eq!(caps.continuous.len(), 1);
+    }
+
+    /// A light can expose more than one axis, which is the whole reason
+    /// capabilities are a list rather than a single control.
+    #[test]
+    fn a_light_can_report_brightness_and_colour_temperature() {
+        let s = state(
+            "light.kitchen",
+            json!({
+                "supported_color_modes": ["color_temp"],
+                "brightness": 200,
+                "color_temp_kelvin": 3000,
+                "min_color_temp_kelvin": 2202,
+                "max_color_temp_kelvin": 6535
+            }),
+        );
+        let caps = Capabilities::from_state(&s);
+
+        assert_eq!(caps.continuous.len(), 2);
+        // Brightness first: it is the axis people reach for.
+        assert_eq!(caps.continuous[0].kind, ContinuousKind::Brightness);
+
+        let temp = caps
+            .axis(ContinuousKind::ColorTemp)
+            .expect("color_temp mode means a white axis");
+        assert_eq!((temp.min, temp.max), (2202.0, 6535.0));
+        assert_eq!(temp.current, Some(3000.0));
+    }
+
+    /// `color_temp_kelvin` is null whenever the light sits in another
+    /// colour mode. The axis is still offered, because the device
+    /// supports it, and the slider simply starts at its minimum.
+    #[test]
+    fn colour_temperature_survives_the_light_being_in_another_mode() {
+        let s = state(
+            "light.kitchen",
+            json!({
+                "supported_color_modes": ["color_temp", "hs"],
+                "color_mode": "hs",
+                "color_temp_kelvin": null
+            }),
+        );
+        let temp = Capabilities::from_state(&s)
+            .axis(ContinuousKind::ColorTemp)
+            .cloned()
+            .expect("still supported, just not active");
+
+        assert_eq!(temp.current, None);
     }
 
     #[test]
-    fn onoff_only_light_has_no_brightness_control() {
+    fn onoff_only_light_has_no_continuous_axes() {
         let s = state("light.porch", json!({ "supported_color_modes": ["onoff"] }));
         let caps = Capabilities::from_state(&s);
 
-        // Still tappable, just not dimmable — this is exactly the case
+        // Still tappable, just not adjustable. This is exactly the case
         // an entity-id-only check gets wrong.
         assert_eq!(caps.primary, Some(ActionKind::ToggleLight));
-        assert_eq!(caps.continuous, None);
+        assert!(caps.continuous.is_empty());
     }
 
     #[test]
-    fn light_without_color_modes_has_no_brightness_control() {
+    fn light_without_color_modes_has_no_continuous_axes() {
         let s = state("light.mystery", json!({}));
-        assert_eq!(Capabilities::from_state(&s).continuous, None);
+        assert!(Capabilities::from_state(&s).continuous.is_empty());
     }
 
     #[test]
@@ -492,11 +618,11 @@ mod tests {
                 "temperature": 21.0
             }),
         );
-        let c = Capabilities::from_state(&s)
-            .continuous
+        let caps = Capabilities::from_state(&s);
+        let c = caps
+            .axis(ContinuousKind::Temperature)
             .expect("target temperature supported");
 
-        assert_eq!(c.kind, ContinuousKind::Temperature);
         assert_eq!((c.min, c.max, c.step), (10.0, 28.0, 0.5));
         assert_eq!(c.current, Some(21.0));
     }
@@ -504,21 +630,27 @@ mod tests {
     #[test]
     fn climate_without_target_temperature_feature_has_no_control() {
         let s = state("climate.hall", json!({ "supported_features": 0 }));
-        assert_eq!(Capabilities::from_state(&s).continuous, None);
+        assert!(Capabilities::from_state(&s).continuous.is_empty());
     }
 
     #[test]
     fn cover_needs_set_position_feature() {
         // OPEN|CLOSE|STOP but no SET_POSITION (4).
         let positionless = state("cover.garage", json!({ "supported_features": 11 }));
-        assert_eq!(Capabilities::from_state(&positionless).continuous, None);
+        assert!(
+            Capabilities::from_state(&positionless)
+                .continuous
+                .is_empty()
+        );
 
         let positionable = state(
             "cover.blinds",
             json!({ "supported_features": 15, "current_position": 40 }),
         );
-        let c = Capabilities::from_state(&positionable).continuous.unwrap();
-        assert_eq!(c.kind, ContinuousKind::Position);
+        let caps = Capabilities::from_state(&positionable);
+        let c = caps
+            .axis(ContinuousKind::Position)
+            .expect("SET_POSITION means a position axis");
         assert_eq!(c.current, Some(40.0));
     }
 

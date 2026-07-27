@@ -99,6 +99,9 @@ fn readout(control: &ContinuousControl, value: f32) -> String {
             let pct = (value / control.max * 100.0).round();
             format!("{pct:.0}%")
         }
+        // Kelvin is the unit users actually see on a bulb's box, so it
+        // is shown as-is rather than rescaled to a percentage.
+        ContinuousKind::ColorTemp => format!("{:.0}K", value.round()),
         ContinuousKind::Position => format!("{:.0}%", value.round()),
         ContinuousKind::Temperature => {
             if control.step < 1.0 {
@@ -113,6 +116,7 @@ fn readout(control: &ContinuousControl, value: f32) -> String {
 fn axis_label(kind: ContinuousKind) -> &'static str {
     match kind {
         ContinuousKind::Brightness => "Brightness",
+        ContinuousKind::ColorTemp => "White",
         ContinuousKind::Temperature => "Target",
         ContinuousKind::Position => "Position",
     }
@@ -150,16 +154,19 @@ fn control_row<'a>(
             color: Some(p.text_secondary),
         });
 
+    let axis = control.kind;
     let bar = iced::widget::slider(control.min..=control.max, value, {
         let entity_id = entity_id.to_owned();
         move |value: f32| Message::ControlValueChanged {
             entity_id: entity_id.clone(),
+            axis,
             value,
         }
     })
     .step(control.step)
     .on_release(Message::ControlReleased {
         entity_id: entity_id.to_owned(),
+        axis,
     });
 
     column![
@@ -202,12 +209,11 @@ pub struct WidgetView<'a> {
     pub settings: crate::config::WidgetSettings,
     pub priority: Priority,
     pub title: String,
-    /// The axis this entity exposes, when it has one. Its presence is
-    /// what earns the widget its expand chevron.
-    pub control: Option<ContinuousControl>,
-    /// Locally-held value while the user is driving the control, which
-    /// wins over the value HA last reported.
-    pub pending: Option<f32>,
+    /// Every axis this entity exposes, each paired with the locally-held
+    /// value if the user is currently driving it. A pending value wins
+    /// over whatever HA last reported. A non-empty list is what earns
+    /// the widget its expand chevron.
+    pub axes: Vec<(ContinuousControl, Option<f32>)>,
 }
 
 pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
@@ -219,8 +225,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
         settings: widget_settings,
         priority,
         title,
-        control,
-        pending,
+        axes,
     } = ctx;
 
     let (_friendly, main_opt, detail) = format_main_value(state);
@@ -271,6 +276,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
             // from an entity id, so `primary_for_entity` cannot hand one
             // back here and there is no header affordance for them.
             ActionKind::SetBrightness(_)
+            | ActionKind::SetColorTemp(_)
             | ActionKind::SetTemperature(_)
             | ActionKind::SetPosition(_) => return None,
         };
@@ -305,7 +311,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
     // does something, and the chevron the signal that it has a value
     // worth adjusting. Gated on `connected` for the same reason the
     // action is, a control that cannot reach HA would swallow drags.
-    if control.is_some() && connected {
+    if !axes.is_empty() && connected {
         let (icon, tooltip) = if state.is_expanded() {
             (Icon::ChevronUp, "Hide controls")
         } else {
@@ -420,16 +426,18 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
         // window grew by. They are part of the widget rather than a
         // window of their own, so they cannot drift away from the value
         // they belong to (#87).
-        if let (true, Some(control)) = (state.is_expanded(), control.as_ref()) {
-            inner_column =
-                inner_column.push(space().height(widget_settings.widget_size.value_detail_gap()));
-            inner_column = inner_column.push(control_row(
-                &state.entity_id,
-                control,
-                pending,
-                widget_settings.widget_size.detail_font(),
-                p,
-            ));
+        if state.is_expanded() {
+            for (control, pending) in &axes {
+                inner_column = inner_column
+                    .push(space().height(widget_settings.widget_size.value_detail_gap()));
+                inner_column = inner_column.push(control_row(
+                    &state.entity_id,
+                    control,
+                    *pending,
+                    widget_settings.widget_size.detail_font(),
+                    p,
+                ));
+            }
         }
 
         inner_column

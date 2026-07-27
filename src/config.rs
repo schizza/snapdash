@@ -27,7 +27,7 @@ pub struct Config {
     ///
     /// Replaces the four parallel maps this struct used to carry
     /// (positions / priorities / names / visibility). Those could drift
-    /// out of sync — `ToggleWidget` removed the entity from `widgets`
+    /// out of sync - `ToggleWidget` removed the entity from `widgets`
     /// but cleaned none of them, so every removed widget leaked its
     /// state into config.json forever. One map makes that impossible:
     /// removal is a single `remove` and there is no "other map" to
@@ -60,7 +60,7 @@ pub struct WidgetPosition {
 /// Everything the user has configured for one widget.
 ///
 /// Every field is optional-or-default, so a widget the user hasn't
-/// customised is `WidgetConfig::default()` and gets pruned on save —
+/// customised is `WidgetConfig::default()` and gets pruned on save -
 /// keeping the "only deviations are persisted" property the parallel
 /// maps had, at entry granularity instead of key granularity.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]

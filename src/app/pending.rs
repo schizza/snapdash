@@ -11,19 +11,28 @@
 //! a broadcast carrying no reference to the service call that caused it,
 //! so there is no correlation id to match on even over the WebSocket.
 //! The settle timeout is the safety net for the case value-matching
-//! cannot terminate on its own — HA clamping the value, rejecting the
+//! cannot terminate on its own: HA clamping the value, rejecting the
 //! call, or silently dropping it. Without it a pending value would stay
 //! authoritative forever and the widget would quietly lie about the
 //! state of the house.
+//!
+//! State is kept **per axis**, so brightness and colour temperature
+//! reconcile independently and neither overwrites the other. Throttling
+//! is kept **per entity**, so a light with two sliders still peaks at
+//! the same call rate as one with a single slider. That is what keeps
+//! the arithmetic in `docs/adr/0003-service-calls-stay-on-rest.md` valid
+//! as axes are added.
 //!
 //! Recorded in `docs/adr/0002-pending-values-and-settle-window.md`.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-/// Minimum gap between service calls while a control is being dragged.
-/// Caps the send rate at ~5/sec, which is what keeps REST viable as the
-/// transport (`docs/adr/0003-service-calls-stay-on-rest.md`).
+use crate::ha::ContinuousKind;
+
+/// Minimum gap between service calls for one entity while it is being
+/// driven. Caps the send rate at ~5/sec, which is what keeps REST viable
+/// as the transport (`docs/adr/0003-service-calls-stay-on-rest.md`).
 pub const SEND_INTERVAL: Duration = Duration::from_millis(200);
 
 /// How long a released value stays authoritative while waiting for a
@@ -35,14 +44,13 @@ pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 /// a different representation than we sent.
 const EPSILON: f32 = 0.01;
 
-/// One entity's in-flight interaction.
+/// One axis's in-flight interaction.
 #[derive(Debug, Clone)]
-pub struct Pending {
+struct Pending {
     /// What the widget and the control render right now.
     shown: f32,
     /// The most recent value actually put on the wire, awaiting an echo.
     last_sent: Option<f32>,
-    last_send_at: Option<Instant>,
     /// `None` while the user still holds the control. Set on release,
     /// after which the pending value has a bounded life.
     settle_deadline: Option<Instant>,
@@ -53,13 +61,8 @@ impl Pending {
         Self {
             shown: value,
             last_sent: None,
-            last_send_at: None,
             settle_deadline: None,
         }
-    }
-
-    pub fn shown(&self) -> f32 {
-        self.shown
     }
 
     /// The user moved the control. Re-arms the interaction, so a value
@@ -70,26 +73,8 @@ impl Pending {
         self.settle_deadline = None;
     }
 
-    /// Whether the throttle window has elapsed and a send is due.
-    fn send_due(&self, now: Instant) -> bool {
-        match self.last_send_at {
-            None => true,
-            Some(at) => now.duration_since(at) >= SEND_INTERVAL,
-        }
-    }
-
-    fn record_send(&mut self, now: Instant) {
-        self.last_sent = Some(self.shown);
-        self.last_send_at = Some(now);
-    }
-
-    /// The user let go. From here the pending value is on a clock.
-    fn release(&mut self, now: Instant) {
-        self.settle_deadline = Some(now + SETTLE_TIMEOUT);
-    }
-
     /// `true` when this echo is the one we were waiting for, meaning the
-    /// entity can go back to being driven by HA.
+    /// axis can go back to being driven by HA.
     fn reconciles(&self, echoed: f32) -> bool {
         self.last_sent
             .is_some_and(|sent| (sent - echoed).abs() <= EPSILON)
@@ -102,104 +87,156 @@ impl Pending {
     }
 }
 
-/// All in-flight interactions, keyed by entity id.
+type AxisKey = (String, ContinuousKind);
+
+/// All in-flight interactions.
 #[derive(Debug, Default)]
-pub struct PendingValues(HashMap<String, Pending>);
+pub struct PendingValues {
+    axes: HashMap<AxisKey, Pending>,
+    /// Last time anything was sent for an entity. Shared by all of that
+    /// entity's axes, which is what keeps the peak call rate flat as
+    /// axes are added.
+    last_send_at: HashMap<String, Instant>,
+}
 
 impl PendingValues {
-    /// The locally-held value for an entity, if it currently has one.
+    /// The locally-held value for one axis, if it currently has one.
     /// Callers render this in preference to the HA state.
-    pub fn shown(&self, entity_id: &str) -> Option<f32> {
-        self.0.get(entity_id).map(Pending::shown)
+    pub fn shown(&self, entity_id: &str, kind: ContinuousKind) -> Option<f32> {
+        self.axes
+            .get(&(entity_id.to_owned(), kind))
+            .map(|pending| pending.shown)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.axes.is_empty()
     }
 
-    /// Record a new value from the control. Returns `Some(value)` when a
-    /// send is due now, `None` when the throttle window swallows it.
+    /// Whether the throttle window for this entity has elapsed.
+    fn send_due(&self, entity_id: &str, now: Instant) -> bool {
+        match self.last_send_at.get(entity_id) {
+            None => true,
+            Some(at) => now.duration_since(*at) >= SEND_INTERVAL,
+        }
+    }
+
+    /// Record a new value for one axis. Returns `Some(value)` when a send
+    /// is due now, `None` when the entity's throttle window swallows it.
     ///
     /// A swallowed value is not lost: it stays in `shown`, and
     /// [`Self::release`] always flushes the final one.
-    pub fn set(&mut self, entity_id: &str, value: f32, now: Instant) -> Option<f32> {
+    pub fn set(
+        &mut self,
+        entity_id: &str,
+        kind: ContinuousKind,
+        value: f32,
+        now: Instant,
+    ) -> Option<f32> {
+        let due = self.send_due(entity_id, now);
+
         let pending = self
-            .0
-            .entry(entity_id.to_owned())
+            .axes
+            .entry((entity_id.to_owned(), kind))
             .or_insert_with(|| Pending::new(value));
         pending.update(value);
 
-        if pending.send_due(now) {
-            pending.record_send(now);
-            Some(value)
-        } else {
-            None
+        if !due {
+            return None;
         }
+
+        pending.last_sent = Some(value);
+        self.last_send_at.insert(entity_id.to_owned(), now);
+        Some(value)
     }
 
     /// The user released the control. Always returns the final value to
     /// send, so an interaction never ends on a throttled-away
     /// intermediate, and starts the settle window.
-    pub fn release(&mut self, entity_id: &str, now: Instant) -> Option<f32> {
-        let pending = self.0.get_mut(entity_id)?;
+    pub fn release(&mut self, entity_id: &str, kind: ContinuousKind, now: Instant) -> Option<f32> {
+        let pending = self.axes.get_mut(&(entity_id.to_owned(), kind))?;
         let value = pending.shown;
-        pending.record_send(now);
-        pending.release(now);
+
+        pending.last_sent = Some(value);
+        pending.settle_deadline = Some(now + SETTLE_TIMEOUT);
+        self.last_send_at.insert(entity_id.to_owned(), now);
+
         Some(value)
     }
 
-    /// Feed in an echoed value from `state_changed`.
+    /// Feed in the values an entity's `state_changed` carries, one per
+    /// axis it reports.
     ///
-    /// Returns `true` when the entity is now HA-driven again — either
-    /// because the echo matched what we sent, or because it had no
-    /// pending value to begin with. `false` means the caller must keep
-    /// rendering the pending value and ignore this echo.
-    pub fn reconcile(&mut self, entity_id: &str, echoed: Option<f32>) -> bool {
-        let Some(pending) = self.0.get(entity_id) else {
-            return true;
-        };
+    /// Returns `true` when the entity is HA-driven again, meaning no axis
+    /// of it is still waiting. `false` means the caller must keep
+    /// rendering the pending values and ignore this echo, because
+    /// applying it would drag a slider back under the user's finger.
+    pub fn reconcile(&mut self, entity_id: &str, echoed: &[(ContinuousKind, Option<f32>)]) -> bool {
+        for (kind, value) in echoed {
+            let key = (entity_id.to_owned(), *kind);
+            let Some(pending) = self.axes.get(&key) else {
+                continue;
+            };
 
-        match echoed {
-            Some(value) if pending.reconciles(value) => {
-                self.0.remove(entity_id);
-                true
+            if value.is_some_and(|value| pending.reconciles(value)) {
+                self.axes.remove(&key);
             }
-            _ => false,
         }
+
+        let still_waiting = self.axes.keys().any(|(id, _)| id == entity_id);
+        if !still_waiting {
+            self.last_send_at.remove(entity_id);
+        }
+
+        !still_waiting
     }
 
     /// Drop every pending value whose settle window has run out, so HA
     /// truth wins again after a command it clamped or dropped.
     ///
-    /// Returns the entities that were retired. The caller needs them
-    /// individually: a widget that just lost its pending value is still
-    /// displaying that local number, and nothing else will correct it
-    /// until the next `state_changed` — which, in exactly the case the
-    /// timeout exists for, may never come.
+    /// Returns the entities that lost at least one axis, without
+    /// duplicates. The caller needs them individually: a widget that just
+    /// lost a pending value is still displaying that local number, and
+    /// nothing else will correct it. In exactly the case the timeout
+    /// exists for, the next `state_changed` may never come.
     pub fn expire(&mut self, now: Instant) -> Vec<String> {
-        let retired: Vec<String> = self
-            .0
+        let retired: Vec<AxisKey> = self
+            .axes
             .iter()
             .filter(|(_, pending)| pending.expired(now))
-            .map(|(entity_id, _)| entity_id.clone())
+            .map(|(key, _)| key.clone())
             .collect();
 
-        for entity_id in &retired {
-            self.0.remove(entity_id);
+        let mut entities: Vec<String> = Vec::new();
+        for key in retired {
+            if !entities.contains(&key.0) {
+                entities.push(key.0.clone());
+            }
+            self.axes.remove(&key);
         }
 
-        retired
+        for entity_id in &entities {
+            if !self.axes.keys().any(|(id, _)| id == entity_id) {
+                self.last_send_at.remove(entity_id);
+            }
+        }
+
+        entities
     }
 
-    /// Forget an entity entirely, e.g. when its widget or popover closes.
+    /// Forget an entity entirely, e.g. when its widget closes or its
+    /// controls are collapsed.
     pub fn clear(&mut self, entity_id: &str) {
-        self.0.remove(entity_id);
+        self.axes.retain(|(id, _), _| id != entity_id);
+        self.last_send_at.remove(entity_id);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const BRIGHTNESS: ContinuousKind = ContinuousKind::Brightness;
+    const TEMP: ContinuousKind = ContinuousKind::ColorTemp;
 
     fn t0() -> Instant {
         Instant::now()
@@ -208,7 +245,7 @@ mod tests {
     #[test]
     fn first_value_sends_immediately() {
         let mut p = PendingValues::default();
-        assert_eq!(p.set("light.a", 100.0, t0()), Some(100.0));
+        assert_eq!(p.set("light.a", BRIGHTNESS, 100.0, t0()), Some(100.0));
     }
 
     #[test]
@@ -216,21 +253,56 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        assert_eq!(p.set("light.a", 100.0, now), Some(100.0));
-        // Still inside SEND_INTERVAL — no wire traffic...
+        assert_eq!(p.set("light.a", BRIGHTNESS, 100.0, now), Some(100.0));
+        // Still inside SEND_INTERVAL, so no wire traffic...
         assert_eq!(
-            p.set("light.a", 120.0, now + Duration::from_millis(50)),
+            p.set(
+                "light.a",
+                BRIGHTNESS,
+                120.0,
+                now + Duration::from_millis(50)
+            ),
             None
         );
         assert_eq!(
-            p.set("light.a", 140.0, now + Duration::from_millis(100)),
+            p.set(
+                "light.a",
+                BRIGHTNESS,
+                140.0,
+                now + Duration::from_millis(100)
+            ),
             None
         );
         // ...but the value is not lost, the control still shows it.
-        assert_eq!(p.shown("light.a"), Some(140.0));
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(140.0));
 
         // Past the window, the next move goes out.
-        assert_eq!(p.set("light.a", 160.0, now + SEND_INTERVAL), Some(160.0));
+        assert_eq!(
+            p.set("light.a", BRIGHTNESS, 160.0, now + SEND_INTERVAL),
+            Some(160.0)
+        );
+    }
+
+    /// The throttle is per entity, not per axis. Two sliders on one light
+    /// must not double its call rate, or the ~5/sec ceiling that keeps
+    /// REST viable (ADR-0003) stops holding as axes are added.
+    #[test]
+    fn axes_of_one_entity_share_the_send_throttle() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        assert_eq!(p.set("light.a", BRIGHTNESS, 100.0, now), Some(100.0));
+        // A different axis of the same light, immediately after.
+        assert_eq!(
+            p.set("light.a", TEMP, 3000.0, now + Duration::from_millis(10)),
+            None,
+            "shares the entity's window"
+        );
+        // A different entity is unaffected.
+        assert_eq!(
+            p.set("light.b", BRIGHTNESS, 50.0, now + Duration::from_millis(10)),
+            Some(50.0)
+        );
     }
 
     #[test]
@@ -238,16 +310,21 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", 100.0, now);
+        p.set("light.a", BRIGHTNESS, 100.0, now);
         // Throttled away.
         assert_eq!(
-            p.set("light.a", 250.0, now + Duration::from_millis(10)),
+            p.set(
+                "light.a",
+                BRIGHTNESS,
+                250.0,
+                now + Duration::from_millis(10)
+            ),
             None
         );
         // Release must still put 250 on the wire, or the light ends up
         // sitting at a value the user scrubbed past.
         assert_eq!(
-            p.release("light.a", now + Duration::from_millis(20)),
+            p.release("light.a", BRIGHTNESS, now + Duration::from_millis(20)),
             Some(250.0)
         );
     }
@@ -257,15 +334,42 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", 100.0, now);
-        assert!(!p.reconcile("light.a", Some(40.0)), "stale echo ignored");
-        assert_eq!(p.shown("light.a"), Some(100.0));
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        assert!(
+            !p.reconcile("light.a", &[(BRIGHTNESS, Some(40.0))]),
+            "stale echo ignored"
+        );
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0));
 
         assert!(
-            p.reconcile("light.a", Some(100.0)),
+            p.reconcile("light.a", &[(BRIGHTNESS, Some(100.0))]),
             "matching echo resolves"
         );
-        assert_eq!(p.shown("light.a"), None);
+        assert_eq!(p.shown("light.a", BRIGHTNESS), None);
+    }
+
+    /// One echo carries every axis. Resolving brightness while colour
+    /// temperature is still in flight must not hand the whole widget
+    /// back to HA, or the temperature slider jumps under the finger.
+    #[test]
+    fn an_entity_stays_held_while_any_axis_is_still_waiting() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.set("light.a", TEMP, 3000.0, now + SEND_INTERVAL);
+
+        let resolved = p.reconcile(
+            "light.a",
+            &[(BRIGHTNESS, Some(100.0)), (TEMP, Some(2500.0))],
+        );
+
+        assert!(!resolved, "colour temperature has not come back yet");
+        assert_eq!(p.shown("light.a", BRIGHTNESS), None, "brightness resolved");
+        assert_eq!(p.shown("light.a", TEMP), Some(3000.0), "still held");
+
+        assert!(p.reconcile("light.a", &[(TEMP, Some(3000.0))]));
+        assert!(p.is_empty());
     }
 
     #[test]
@@ -273,15 +377,15 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("climate.a", 21.5, now);
-        assert!(p.reconcile("climate.a", Some(21.502)));
+        p.set("climate.a", ContinuousKind::Temperature, 21.5, now);
+        assert!(p.reconcile("climate.a", &[(ContinuousKind::Temperature, Some(21.502))]));
     }
 
     #[test]
     fn entities_without_a_pending_value_are_always_ha_driven() {
         let mut p = PendingValues::default();
-        assert!(p.reconcile("sensor.temp", Some(12.0)));
-        assert!(p.reconcile("sensor.temp", None));
+        assert!(p.reconcile("sensor.temp", &[]));
+        assert!(p.reconcile("sensor.temp", &[(BRIGHTNESS, Some(12.0))]));
     }
 
     #[test]
@@ -289,11 +393,11 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", 100.0, now);
-        // A state_changed with no readable numeric value must not be
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        // A state_changed with no readable value for the axis must not be
         // mistaken for confirmation.
-        assert!(!p.reconcile("light.a", None));
-        assert_eq!(p.shown("light.a"), Some(100.0));
+        assert!(!p.reconcile("light.a", &[(BRIGHTNESS, None)]));
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0));
     }
 
     #[test]
@@ -301,31 +405,52 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", 100.0, now);
+        p.set("light.a", BRIGHTNESS, 100.0, now);
         // Long past the settle timeout, but the user has not let go.
         assert!(p.expire(now + SETTLE_TIMEOUT * 10).is_empty());
-        assert_eq!(p.shown("light.a"), Some(100.0));
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0));
     }
 
     /// One entity expiring must be reported even while others are still
-    /// pending — the caller refreshes exactly the retired widgets, and a
+    /// pending: the caller refreshes exactly the retired widgets, and a
     /// widget that isn't named keeps showing a value HA never confirmed.
     #[test]
     fn expiry_reports_each_entity_independently() {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", 100.0, now);
-        p.release("light.a", now);
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.release("light.a", BRIGHTNESS, now);
         // Second entity grabbed later, so its window has not elapsed.
-        p.set("light.b", 50.0, now + SETTLE_TIMEOUT);
-        p.release("light.b", now + SETTLE_TIMEOUT);
+        p.set("light.b", BRIGHTNESS, 50.0, now + SETTLE_TIMEOUT);
+        p.release("light.b", BRIGHTNESS, now + SETTLE_TIMEOUT);
 
         let retired = p.expire(now + SETTLE_TIMEOUT);
         assert_eq!(retired, vec!["light.a".to_owned()]);
-        assert_eq!(p.shown("light.a"), None);
-        assert_eq!(p.shown("light.b"), Some(50.0), "still inside its window");
+        assert_eq!(p.shown("light.a", BRIGHTNESS), None);
+        assert_eq!(
+            p.shown("light.b", BRIGHTNESS),
+            Some(50.0),
+            "still inside its window"
+        );
         assert!(!p.is_empty());
+    }
+
+    /// Two axes of one entity expiring together name that entity once.
+    /// The caller uses the list to push HA truth back onto each widget,
+    /// and doing it twice would be wasted work.
+    #[test]
+    fn expiry_names_an_entity_once_however_many_axes_it_lost() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.release("light.a", BRIGHTNESS, now);
+        p.set("light.a", TEMP, 3000.0, now);
+        p.release("light.a", TEMP, now);
+
+        assert_eq!(p.expire(now + SETTLE_TIMEOUT), vec!["light.a".to_owned()]);
+        assert!(p.is_empty());
     }
 
     #[test]
@@ -333,18 +458,22 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", 100.0, now);
-        p.release("light.a", now);
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.release("light.a", BRIGHTNESS, now);
 
         assert!(
             p.expire(now + SETTLE_TIMEOUT - Duration::from_millis(1))
                 .is_empty()
         );
-        assert_eq!(p.shown("light.a"), Some(100.0), "still inside the window");
+        assert_eq!(
+            p.shown("light.a", BRIGHTNESS),
+            Some(100.0),
+            "still inside the window"
+        );
 
         // HA clamped or dropped the command and will never echo 100.
         assert_eq!(p.expire(now + SETTLE_TIMEOUT), vec!["light.a".to_owned()]);
-        assert_eq!(p.shown("light.a"), None, "HA truth wins again");
+        assert_eq!(p.shown("light.a", BRIGHTNESS), None, "HA truth wins again");
     }
 
     #[test]
@@ -352,21 +481,29 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", 100.0, now);
-        p.release("light.a", now);
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.release("light.a", BRIGHTNESS, now);
         // User grabs the slider again before the window elapses.
-        p.set("light.a", 200.0, now + SEND_INTERVAL);
+        p.set("light.a", BRIGHTNESS, 200.0, now + SEND_INTERVAL);
 
         // The old deadline must not still be running.
         assert!(p.expire(now + SETTLE_TIMEOUT).is_empty());
-        assert_eq!(p.shown("light.a"), Some(200.0));
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(200.0));
     }
 
     #[test]
-    fn clear_forgets_the_entity() {
+    fn clear_forgets_every_axis_of_the_entity() {
+        let now = t0();
         let mut p = PendingValues::default();
-        p.set("light.a", 100.0, t0());
+
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.set("light.a", TEMP, 3000.0, now);
+        p.set("light.b", BRIGHTNESS, 50.0, now);
+
         p.clear("light.a");
-        assert!(p.is_empty());
+
+        assert_eq!(p.shown("light.a", BRIGHTNESS), None);
+        assert_eq!(p.shown("light.a", TEMP), None);
+        assert_eq!(p.shown("light.b", BRIGHTNESS), Some(50.0), "untouched");
     }
 }

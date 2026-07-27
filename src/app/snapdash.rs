@@ -149,10 +149,11 @@ pub enum Message {
         origin: Option<iced::Point>,
         monitor: Option<iced::Size>,
     },
-    /// Slider moved. Records a pending value and sends only if the
-    /// throttle window has elapsed.
+    /// Slider moved. Records a pending value for that axis and sends
+    /// only if the entity's throttle window has elapsed.
     ControlValueChanged {
         entity_id: String,
+        axis: ha::ContinuousKind,
         value: f32,
     },
     /// Slider released. Always flushes the final value so an interaction
@@ -160,6 +161,7 @@ pub enum Message {
     /// settle window.
     ControlReleased {
         entity_id: String,
+        axis: ha::ContinuousKind,
     },
     /// Ticks only while a pending value is outstanding, to retire the
     /// ones whose settle window ran out without a matching echo.
@@ -403,13 +405,16 @@ impl Snapdash {
         }
     }
 
-    /// The value an echo carries for whichever axis the user might be
-    /// driving, so it can be compared against what we last sent. `None`
-    /// when the entity has no continuous axis or is not reporting one.
-    fn echoed_value(state: &EntityState) -> Option<f32> {
+    /// The value this echo carries for each axis the entity exposes, so
+    /// each can be compared against what we last sent for it. An axis HA
+    /// is not currently reporting comes back as `None`, which never
+    /// counts as confirmation.
+    fn echoed_values(state: &EntityState) -> Vec<(ha::ContinuousKind, Option<f32>)> {
         ha::Capabilities::from_state(state)
             .continuous
-            .and_then(|control| control.current)
+            .into_iter()
+            .map(|control| (control.kind, control.current))
+            .collect()
     }
 
     fn apply_entity_state(&mut self, new_state: EntityState) {
@@ -424,7 +429,7 @@ impl Snapdash {
         // back to. See `docs/adr/0002-pending-values-and-settle-window.md`.
         let ha_driven = self
             .pending
-            .reconcile(&entity_id, Self::echoed_value(&new_state));
+            .reconcile(&entity_id, &Self::echoed_values(&new_state));
 
         let (pulse, should_refresh_settings) = match self.ha.entities.get(&entity_id) {
             None => (true, true),
@@ -498,24 +503,30 @@ impl Snapdash {
         }
     }
 
-    /// The continuous control an entity currently exposes, if any.
-    fn control_for(&self, entity_id: &str) -> Option<ha::ContinuousControl> {
+    /// Every axis an entity currently exposes, in display order.
+    fn controls_for(&self, entity_id: &str) -> Vec<ha::ContinuousControl> {
         self.ha
             .entities
             .get(entity_id)
             .map(ha::Capabilities::from_state)
-            .and_then(|caps| caps.continuous)
+            .map(|caps| caps.continuous)
+            .unwrap_or_default()
     }
 
-    /// Turn a raw slider value into the right service call for whichever
-    /// axis the entity exposes, then dispatch it.
+    /// Turn a raw slider value into the right service call for that axis,
+    /// then dispatch it.
     fn send_continuous(
         &self,
         entity_id: &str,
+        axis: ha::ContinuousKind,
         value: f32,
         connection: HaConnectionConfig,
     ) -> Task<Message> {
-        let Some(control) = self.control_for(entity_id) else {
+        let Some(control) = self
+            .controls_for(entity_id)
+            .into_iter()
+            .find(|c| c.kind == axis)
+        else {
             return Task::none();
         };
 
@@ -1656,13 +1667,14 @@ impl Snapdash {
                     return Task::none();
                 };
                 // Nothing to reveal means nothing to grow into.
-                if self.control_for(&entity_id).is_none() {
+                let axes = self.controls_for(&entity_id).len();
+                if axes == 0 {
                     return Task::none();
                 }
 
                 let size = self.config.widget_settings.widget_size;
                 let base = size.window_size();
-                let grown_by = size.controls_height(1);
+                let grown_by = size.controls_height(axes);
 
                 // Without a reported position there is no way to tell
                 // whether the widget is near an edge, so it grows
@@ -1695,7 +1707,11 @@ impl Snapdash {
                 }
             }
 
-            Message::ControlValueChanged { entity_id, value } => {
+            Message::ControlValueChanged {
+                entity_id,
+                axis,
+                value,
+            } => {
                 let Some(connection) = self.live_connection() else {
                     self.set_status(
                         format!("Cannot adjust {entity_id}: not connected to Home Assistant"),
@@ -1704,29 +1720,31 @@ impl Snapdash {
                     return Task::none();
                 };
 
-                // `set` returns None when the throttle window swallows
-                // this move. The value is not lost: it stays in `shown`,
-                // and `ControlReleased` always flushes the final one.
-                let Some(value) = self
-                    .pending
-                    .set(&entity_id, value, std::time::Instant::now())
+                // `set` returns None when the entity's throttle window
+                // swallows this move. The value is not lost: it stays in
+                // `shown`, and `ControlReleased` flushes the final one.
+                let Some(value) =
+                    self.pending
+                        .set(&entity_id, axis, value, std::time::Instant::now())
                 else {
                     return Task::none();
                 };
 
-                self.send_continuous(&entity_id, value, connection)
+                self.send_continuous(&entity_id, axis, value, connection)
             }
 
-            Message::ControlReleased { entity_id } => {
+            Message::ControlReleased { entity_id, axis } => {
                 let Some(connection) = self.live_connection() else {
                     return Task::none();
                 };
-                let Some(value) = self.pending.release(&entity_id, std::time::Instant::now())
+                let Some(value) = self
+                    .pending
+                    .release(&entity_id, axis, std::time::Instant::now())
                 else {
                     return Task::none();
                 };
 
-                self.send_continuous(&entity_id, value, connection)
+                self.send_continuous(&entity_id, axis, value, connection)
             }
 
             Message::PendingTick(now) => {
