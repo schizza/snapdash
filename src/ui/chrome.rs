@@ -18,12 +18,7 @@ pub fn window_content<'a>(
     match &win.kind {
         WindowKind::Settings => crate::ui::settings::view(app, id),
         WindowKind::Entity { entity_id } => {
-            let priority = app
-                .config
-                .widget_priorities
-                .get(entity_id)
-                .copied()
-                .unwrap_or_default();
+            let priority = app.config.priority(entity_id);
             crate::ui::entity_window::view(
                 &win.entity,
                 app.theme.palette,
@@ -93,12 +88,7 @@ pub fn with_gear_overlay<'a>(
         .padding(10)
         .into();
 
-    let current = app
-        .config
-        .widget_priorities
-        .get(&win.entity.entity_id)
-        .copied()
-        .unwrap_or_default();
+    let current = app.config.priority(&win.entity.entity_id);
 
     let priority_layer: Element<Message> =
         iced::widget::container(priority_selector(&win.entity.entity_id, current, p))

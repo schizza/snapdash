@@ -31,7 +31,7 @@ pub fn active_sensor_section(app: &crate::app::Snapdash, p: Palette) -> Element<
 
     let mut col = column![];
     for sensor in active_sensors {
-        let badge = if app.config.widget_visibility.contains_key(&sensor.entity_id)
+        let badge = if app.config.visibility(&sensor.entity_id).is_some()
             && !app.is_widget_visible(&sensor.entity_id)
         {
             Some(hidden_badge(p))

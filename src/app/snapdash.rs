@@ -496,13 +496,8 @@ impl Snapdash {
     /// Resolved title for a widget: custom override (if any) → HA
     /// friendly_name → bare entity_id without the domain prefix.
     pub fn display_name(&self, entity_id: &str) -> String {
-        if let Some(name) = self
-            .config
-            .widget_names
-            .get(entity_id)
-            .filter(|s| !s.is_empty())
-        {
-            return name.clone();
+        if let Some(name) = self.config.name_override(entity_id) {
+            return name.to_owned();
         }
 
         if let Some(name) = self
@@ -521,7 +516,7 @@ impl Snapdash {
     /// visible. Rule → delegate to its evaluator against current HA
     /// entities.
     pub fn is_widget_visible(&self, entity_id: &str) -> bool {
-        match self.config.widget_visibility.get(entity_id) {
+        match self.config.visibility(entity_id) {
             None => true,
             Some(rule) => rule.evaluate(&self.ha.entities),
         }
@@ -535,7 +530,7 @@ impl Snapdash {
     fn update_widget_visibility(&mut self) -> Task<Message> {
         let mut tasks: Vec<Task<Message>> = Vec::new();
 
-        for (entity_id, rule) in &self.config.widget_visibility {
+        for (entity_id, rule) in self.config.visibility_rules() {
             if !self.config.widgets.contains(entity_id) {
                 continue;
             }
@@ -824,13 +819,10 @@ impl Snapdash {
             },
 
             Message::WidgetPriorityChanged(entity_id, priority) => {
-                // Normal is default - drop the key instead of storing it
-                // so config stays lean and only deviations are persisted.
-                if priority == Priority::default() {
-                    self.config.widget_priorities.remove(&entity_id);
-                } else {
-                    self.config.widget_priorities.insert(entity_id, priority);
-                }
+                // Normal is the default and is skipped on serialize, so
+                // storing it unconditionally still keeps config lean -
+                // an entry that ends up all-default is pruned on save.
+                self.config.widget_mut(&entity_id).priority = priority;
                 self.save_config()
             }
 
@@ -1107,7 +1099,7 @@ impl Snapdash {
                         .config
                         .widgets
                         .iter()
-                        .any(|w| self.config.widget_visibility.contains_key(w));
+                        .any(|w| self.config.visibility(w).is_some());
 
                     if has_rule_gated_widget {
                         Task::none()
@@ -1214,7 +1206,7 @@ impl Snapdash {
                         self.config.widget_settings.widget_size.window_size(),
                         false,
                     );
-                    if let Some(saved) = self.config.widget_positions.get(&widget) {
+                    if let Some(saved) = self.config.position(&widget) {
                         win_settings.position =
                             window::Position::Specific(iced::Point::new(saved.x, saved.y));
                     }
@@ -1476,11 +1468,11 @@ impl Snapdash {
                 // Filter: if position is not moved - do nothing. Without filter we will fire
                 // debounce timer with every programatic move (ex. window manager snap-to-grid on borders).
 
-                if self.config.widget_positions.get(&entity_id) == Some(&new_position) {
+                if self.config.position(&entity_id) == Some(new_position) {
                     return Task::none();
                 }
 
-                self.config.widget_positions.insert(entity_id, new_position);
+                self.config.widget_mut(&entity_id).position = Some(new_position);
                 self.last_widget_move_at = Some(std::time::Instant::now());
 
                 Task::perform(
@@ -1492,15 +1484,11 @@ impl Snapdash {
             }
 
             Message::WidgetNameChanged(entity_id, raw) => {
-                // Empty/whitespace → drop the override so the widget falls
-                // back to HA's friendly_name (mirrors the "Normal = drop"
-                // pattern from priority — only deviations are persisted).
-
-                if raw.trim().is_empty() {
-                    self.config.widget_names.remove(&entity_id);
-                } else {
-                    self.config.widget_names.insert(entity_id, raw);
-                }
+                // Empty/whitespace clears the override so the widget falls
+                // back to HA's friendly_name. Storing `None` rather than
+                // removing a key is enough: a widget whose every field is
+                // back at its default is pruned on save.
+                self.config.widget_mut(&entity_id).name = (!raw.trim().is_empty()).then_some(raw);
                 self.save_config()
             }
 
@@ -1510,16 +1498,14 @@ impl Snapdash {
                     // covers "show this sensor only while it reports
                     // something real" without forcing the user to pick a
                     // trigger entity upfront.
-                    self.config.widget_visibility.insert(
-                        entity_id.clone(),
-                        crate::widget_visibility::VisibilityRule {
-                            trigger: entity_id,
+                    self.config.widget_mut(&entity_id).visibility =
+                        Some(crate::widget_visibility::VisibilityRule {
+                            trigger: entity_id.clone(),
                             condition: crate::widget_visibility::VisibilityCondition::IsAvailable,
-                        },
-                    );
+                        });
                     self.update_widget_visibility()
                 } else {
-                    self.config.widget_visibility.remove(&entity_id);
+                    self.config.widget_mut(&entity_id).visibility = None;
                     if self.is_entity_window_open(&entity_id) {
                         Task::none()
                     } else {
@@ -1531,14 +1517,14 @@ impl Snapdash {
             }
 
             Message::WidgetVisibilityTriggerChanged(entity_id, trigger) => {
-                if let Some(rule) = self.config.widget_visibility.get_mut(&entity_id) {
+                if let Some(rule) = self.config.visibility_mut(&entity_id) {
                     rule.trigger = trigger;
                 }
                 self.save_config().chain(self.update_widget_visibility())
             }
 
             Message::WidgetVisibilityConditionChanged(entity_id, kind) => {
-                if let Some(rule) = self.config.widget_visibility.get_mut(&entity_id) {
+                if let Some(rule) = self.config.visibility_mut(&entity_id) {
                     let raw = rule
                         .condition
                         .raw_value()
@@ -1550,7 +1536,7 @@ impl Snapdash {
             }
 
             Message::WidgetVisibilityValueChanged(entity_id, raw) => {
-                if let Some(rule) = self.config.widget_visibility.get_mut(&entity_id) {
+                if let Some(rule) = self.config.visibility_mut(&entity_id) {
                     let kind =
                         crate::widget_visibility::ConditionKind::from_condition(&rule.condition);
                     rule.condition = kind.with_value(raw);
