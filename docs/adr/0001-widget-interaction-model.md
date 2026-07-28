@@ -40,9 +40,34 @@ The card body drags, exactly as it did before any of this.
 The action is a header icon with a tooltip naming what it will do, which is both the affordance and the signal.
 Continuous controls do not live on the card surface at all: the widget expands to reveal them, which is recorded separately.
 
+## The hover chrome yields whenever the card has controls of its own
+
+Three affordances appear on the card only while the pointer is over it: the priority dots at the bottom left, the configure icon at the middle right, and the app gear at the bottom right.
+All three pin themselves to the card's edges, because the middle belongs to the value.
+
+Two states put real controls on that same surface.
+An armed widget replaces its value with a question and two buttons.
+An expanded widget grows downwards, and every pixel it grew by is a slider.
+In both, the card's edges stop being empty margin and become the thing the user is trying to hit.
+
+So in both, the hover chrome is left out of the widget tree entirely.
+Not dimmed, not disabled, not moved: absent.
+
+Dimming is not enough, because an overlay that is merely faint still swallows the press underneath it.
+That is the failure this rule exists to prevent: the priority pill sat across the second slider's track, so the widget looked adjustable and refused to be adjusted.
+
+Moving them is not available either.
+On the 160x110 Small preset there is nowhere for an edge-pinned control to go that is not the value, the prompt or a slider.
+
 ## Consequences
 
 There is no gesture classifier, no movement threshold, no deferred handoff and no timer anywhere in the interaction, so the widget behaves identically on macOS, Windows, X11 and Wayland.
+
+Reaching widget settings or priority while the controls are up costs one click on the chevron to dismiss them first.
+That is the deliberate trade: the controls are why the widget was expanded, and the chrome is a shortcut to a dialog that is also reachable from app settings.
+
+The rule is about the card having a job, not about hover specifically.
+Any future state that puts controls on the card surface inherits it, and any future hover affordance has to honour it.
 
 The header row now carries the title, the action icon, the expand chevron and, when relevant, the update alert.
 At the Small preset that leaves roughly 76px for the title, so titles truncate sooner than they used to.

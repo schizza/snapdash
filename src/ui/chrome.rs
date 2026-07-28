@@ -66,16 +66,14 @@ pub fn with_gear_overlay<'a>(
         return inner;
     }
 
-    // An armed widget is modal: the card is asking a question and the
-    // only answers are its two buttons. These layers sit on top of the
-    // card body, so leaving them up would put the priority dots and the
-    // gear directly over the confirm buttons (#85).
+    // These layers pin themselves to the card's edges, and a widget that
+    // is armed or expanded has put its own controls exactly there: the
+    // confirm buttons (#85), or the sliders the window grew to show
+    // (#87). Leaving them up covers those controls and swallows their
+    // presses, so the chrome is left out of the tree entirely until the
+    // card goes back to being a drag handle.
     //
-    // An expanded widget is the same situation for the same reason: the
-    // height the window grew by is all controls, and these layers pin
-    // themselves to the card's edges, which is exactly where the bottom
-    // slider now sits. They would cover it and swallow its drags (#87).
-    // The chrome comes back when the controls are dismissed.
+    // Recorded in `docs/adr/0001-widget-interaction-model.md`.
     if win.entity.armed_at.is_some() || win.entity.is_expanded() {
         return inner;
     }
