@@ -70,7 +70,13 @@ pub fn with_gear_overlay<'a>(
     // only answers are its two buttons. These layers sit on top of the
     // card body, so leaving them up would put the priority dots and the
     // gear directly over the confirm buttons (#85).
-    if win.entity.armed_at.is_some() {
+    //
+    // An expanded widget is the same situation for the same reason: the
+    // height the window grew by is all controls, and these layers pin
+    // themselves to the card's edges, which is exactly where the bottom
+    // slider now sits. They would cover it and swallow its drags (#87).
+    // The chrome comes back when the controls are dismissed.
+    if win.entity.armed_at.is_some() || win.entity.is_expanded() {
         return inner;
     }
 

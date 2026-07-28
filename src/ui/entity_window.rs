@@ -41,7 +41,14 @@ fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
 ///
 /// The affirmative is red because the gate only exists for actions the
 /// user called risky; the way out is unemphasised so it does not compete.
-fn confirm_prompt<'a>(entity_id: &str, font: f32, p: Palette) -> Element<'a, Message> {
+///
+/// `gap` is the card's own title gap rather than the page-level
+/// `metric::GAP`: at 12px between the question and the buttons, the
+/// prompt is taller than the body of a Small card, and a column that
+/// overflows its limits does not spill in iced, it hands its last child
+/// whatever is left. That was zero, so the two icons laid out inside a
+/// zero-height box and their glyphs were clipped away entirely.
+fn confirm_prompt<'a>(entity_id: &str, font: f32, gap: f32, p: Palette) -> Element<'a, Message> {
     let confirm = |confirmed: bool| Message::WidgetActionConfirmed {
         entity_id: entity_id.to_owned(),
         confirmed,
@@ -79,7 +86,7 @@ fn confirm_prompt<'a>(entity_id: &str, font: f32, p: Palette) -> Element<'a, Mes
 
     iced::widget::container(
         column![prompt, buttons]
-            .spacing(metric::GAP)
+            .spacing(gap)
             .align_x(Alignment::Center),
     )
     .center_x(Length::Fill)
@@ -388,10 +395,13 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
         // An armed widget shows the question instead of the value. It is
         // the one state where the card deliberately stops mirroring the
         // house, which is why being armed is on a clock (#85).
-        let body: Element<Message> = if state.armed_at.is_some() {
+        let armed = state.armed_at.is_some();
+
+        let body: Element<Message> = if armed {
             confirm_prompt(
                 &state.entity_id,
                 widget_settings.widget_size.title_font(),
+                widget_settings.widget_size.title_value_gap(),
                 p,
             )
         } else {
@@ -402,25 +412,33 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
         };
 
         inner_column = inner_column.push(body);
-        inner_column =
-            inner_column.push(space().height(widget_settings.widget_size.value_detail_gap()));
 
-        let detail_line = if widget_settings.widget_size == WidgetSize::Small
-            || !widget_settings.show_measurement_info
-        {
-            space().height(0).width(0).into()
-        } else {
-            detail_line
-        };
+        // The status line is the other half of the card's vertical
+        // budget, and while the question is up the prompt needs all of
+        // it: a Small card has around 27px to give each of two `Fill`
+        // children, and the question plus its buttons do not fit in
+        // that. A widget that has stopped mirroring the house for five
+        // seconds can stop showing its connection dot for the same five
+        // seconds, and the modal card is cleaner for it (#85).
+        if !armed {
+            inner_column =
+                inner_column.push(space().height(widget_settings.widget_size.value_detail_gap()));
 
-        let status_line = row![status_line(p, connected), detail_line]
-            .spacing(metric::GAP)
-            .height(Length::Fill)
-            .height(Length::Fill)
-            .align_y(Alignment::End);
+            let detail_line = if widget_settings.widget_size == WidgetSize::Small
+                || !widget_settings.show_measurement_info
+            {
+                space().height(0).width(0).into()
+            } else {
+                detail_line
+            };
 
-        //        inner_column = inner_column.push(detail_line);
-        inner_column = inner_column.push(status_line);
+            let status_line = row![status_line(p, connected), detail_line]
+                .spacing(metric::GAP)
+                .height(Length::Fill)
+                .align_y(Alignment::End);
+
+            inner_column = inner_column.push(status_line);
+        }
 
         // The controls sit below the status line, in the height the
         // window grew by. They are part of the widget rather than a

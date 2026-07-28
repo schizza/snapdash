@@ -159,12 +159,14 @@ impl WidgetSize {
 
     /// Total height the controls area adds for `axes` controls, or `0.0`
     /// when the entity has none to show.
+    ///
+    /// Every row is preceded by its own separating gap, which is how
+    /// `entity_window` builds them: an entity with two axes gets two
+    /// gaps, not one. Counting a single gap for the whole block left the
+    /// window short by one gap per extra axis, which the last row paid
+    /// for out of its own slack.
     pub fn controls_height(self, axes: usize) -> f32 {
-        if axes == 0 {
-            return 0.0;
-        }
-        // One separating gap above the block, then the rows themselves.
-        self.value_detail_gap() + self.control_row_height() * axes as f32
+        (self.value_detail_gap() + self.control_row_height()) * axes as f32
     }
 }
 
