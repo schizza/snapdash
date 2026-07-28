@@ -86,6 +86,100 @@ pub struct EntityWindowState {
     pub last: Option<EntityState>,
     pub pulse: PulseSpring, // TODO: Replace with Animation/spring. Currently just easy "animation paramter" (0..1), později nahradit Animation/spring
     pub hovered: bool,
+    /// When this widget's confirmation gate was armed, or `None` when it
+    /// is not awaiting a confirmation (#85).
+    ///
+    /// Carries the instant rather than a flag because being armed has a
+    /// bounded life: the card shows the prompt instead of the value, and
+    /// a widget that stopped mirroring the house indefinitely is the one
+    /// failure a dashboard must not have.
+    ///
+    /// Deliberately runtime-only, never persisted. An armed widget that
+    /// survived a restart would be a loaded gun with no visible cause.
+    pub armed_at: Option<std::time::Instant>,
+    /// Set while the widget is grown out of its size preset to show its
+    /// continuous controls (#87), `None` when it sits at preset size.
+    ///
+    /// Also the record of how far the window had to be lifted to fit, so
+    /// a `Moved` arriving while it is up can be corrected back to the
+    /// position the collapsed card will occupy. See `Message::WidgetMoved`.
+    pub expansion: Option<Expansion>,
+}
+
+/// How long an armed widget waits before disarming itself.
+pub const ARM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A widget grown out of its size preset to reveal its continuous
+/// controls, and what it takes to put it back.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Expansion {
+    /// Extra height the controls occupy.
+    pub grown_by: f32,
+    /// How far the window was moved up to make room, `0.0` when there
+    /// was room to grow downwards. Collapsing gives this back, so the
+    /// widget ends up exactly where the user left it.
+    pub lifted_by: f32,
+}
+
+impl EntityWindowState {
+    /// `true` when this widget has been waiting for a confirmation
+    /// longer than [`ARM_TIMEOUT`], so it should go back to showing its
+    /// value. Never true for a widget that is not armed.
+    pub fn arm_expired(&self, now: std::time::Instant) -> bool {
+        self.armed_at
+            .is_some_and(|at| now.duration_since(at) >= ARM_TIMEOUT)
+    }
+
+    pub fn is_expanded(&self) -> bool {
+        self.expansion.is_some()
+    }
+
+    /// Where this widget belongs, given where its window currently is.
+    ///
+    /// config.json stores the position of the *collapsed* card, because
+    /// that is the only one that survives the session. A widget expanded
+    /// near the bottom edge is sitting `lifted_by` pixels above its own
+    /// place, so that much is added back before the position is written.
+    ///
+    /// Correcting rather than ignoring the move is what lets the user
+    /// drag a widget while its controls are up: the drag is theirs and it
+    /// is kept, at the place the card will occupy once they are dismissed,
+    /// which is exactly where collapsing then puts it.
+    pub fn resting_position(&self, position: iced::Point) -> iced::Point {
+        let lifted_by = self.expansion.map_or(0.0, |expansion| expansion.lifted_by);
+
+        iced::Point::new(position.x, position.y + lifted_by)
+    }
+}
+
+/// Vertical room left for the Dock, the taskbar or a panel.
+///
+/// A guess, not a measurement: the fork's `monitor_size` reports the
+/// monitor's full resolution rather than its work area, so there is
+/// nothing better to subtract. Tracked in #90 together with the
+/// multi-monitor origin, which the same call also drops.
+const EDGE_RESERVE: f32 = 80.0;
+
+/// Decide how a widget at `origin` grows by `grown_by` pixels without
+/// running off the bottom of the screen.
+///
+/// Returns how far the window has to be lifted first: `0.0` when it can
+/// simply grow downwards. The lift never exceeds `origin.y`, so a widget
+/// near the top of a short screen grows down and overflows rather than
+/// being pushed off the top edge, where it could not be dragged back.
+///
+/// `monitor` is `None` when the platform would not say, in which case
+/// the widget grows downwards and the compositor decides what that
+/// looks like.
+pub fn lift_needed(origin_y: f32, base_height: f32, grown_by: f32, monitor: Option<f32>) -> f32 {
+    let Some(monitor_height) = monitor else {
+        return 0.0;
+    };
+
+    let bottom_limit = monitor_height - EDGE_RESERVE;
+    let overflow = (origin_y + base_height + grown_by) - bottom_limit;
+
+    overflow.clamp(0.0, origin_y.max(0.0))
 }
 
 /// Look up the window id for a given `kind`, optionally matching on the
@@ -110,4 +204,118 @@ pub fn find_window_id(
             }
         })
         .map(|(&id, _)| id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn widget(armed_at: Option<Instant>) -> EntityWindowState {
+        EntityWindowState {
+            entity_id: "switch.pump".into(),
+            armed_at,
+            ..Default::default()
+        }
+    }
+
+    fn expanded(lifted_by: f32) -> EntityWindowState {
+        EntityWindowState {
+            entity_id: "light.kitchen".into(),
+            expansion: Some(Expansion {
+                grown_by: 92.0,
+                lifted_by,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// A widget that never left its preset size is already where it
+    /// belongs, so its position is written through untouched.
+    #[test]
+    fn a_widget_at_rest_is_persisted_where_it_is() {
+        let at = iced::Point::new(300.0, 200.0);
+        assert_eq!(widget(None).resting_position(at), at);
+        assert_eq!(expanded(0.0).resting_position(at), at, "grew downwards");
+    }
+
+    /// A widget lifted to make room is sitting above its own place. What
+    /// belongs in config is where the collapsed card will be, or the
+    /// widget climbs the screen a little further every time it is opened.
+    #[test]
+    fn a_lifted_widget_is_persisted_where_it_will_land() {
+        assert_eq!(
+            expanded(140.0).resting_position(iced::Point::new(300.0, 800.0)),
+            iced::Point::new(300.0, 940.0)
+        );
+    }
+
+    /// Dragging a widget while its controls are up is the user
+    /// repositioning it, and that drag is theirs to keep. It is persisted
+    /// at the place the card will occupy once they are dismissed, which is
+    /// exactly where `collapse_widget` then moves the window.
+    #[test]
+    fn dragging_an_expanded_widget_persists_where_collapsing_will_put_it() {
+        let dragged_to = iced::Point::new(120.0, 500.0);
+        let lifted_by = 140.0;
+
+        let resting = expanded(lifted_by).resting_position(dragged_to);
+
+        // `collapse_widget` gives the lift back relative to where the
+        // window is now, so the two have to agree.
+        assert_eq!(resting.y, dragged_to.y + lifted_by);
+    }
+
+    /// Room below: the widget grows downwards and stays put.
+    #[test]
+    fn a_widget_with_room_below_does_not_move() {
+        assert_eq!(lift_needed(200.0, 110.0, 90.0, Some(1080.0)), 0.0);
+    }
+
+    /// Near the bottom edge it has to come up, and by exactly as much as
+    /// it would otherwise overflow, not by its whole growth.
+    #[test]
+    fn a_widget_near_the_bottom_is_lifted_by_the_overflow() {
+        // 1080 tall, 80 reserved for the Dock, so the usable bottom is
+        // 1000. A 110-tall widget at y=940 already ends at 1050 and
+        // growing 90 more would put it at 1140, so it overflows by 140.
+        assert_eq!(lift_needed(940.0, 110.0, 90.0, Some(1080.0)), 140.0);
+    }
+
+    /// The lift must never push the title row off the top, because a
+    /// widget whose drag handle is off-screen cannot be brought back.
+    #[test]
+    fn the_lift_never_pushes_a_widget_off_the_top() {
+        // Barely any room above, and far too little below.
+        let lift = lift_needed(20.0, 110.0, 200.0, Some(300.0));
+        assert_eq!(lift, 20.0, "capped at the distance to the top edge");
+    }
+
+    /// No monitor size means no basis for a decision, so grow downwards
+    /// and let the compositor deal with it rather than guessing.
+    #[test]
+    fn an_unknown_monitor_grows_downwards() {
+        assert_eq!(lift_needed(940.0, 110.0, 90.0, None), 0.0);
+    }
+
+    #[test]
+    fn a_widget_that_is_not_armed_never_expires() {
+        assert!(!widget(None).arm_expired(Instant::now()));
+    }
+
+    #[test]
+    fn arming_survives_its_window_and_ends_after_it() {
+        let now = Instant::now();
+        let w = widget(Some(now));
+
+        assert!(!w.arm_expired(now), "just armed");
+        assert!(
+            !w.arm_expired(now + ARM_TIMEOUT - std::time::Duration::from_millis(1)),
+            "still inside the window, the user may be deciding"
+        );
+        // The user armed the widget and walked away. Nothing else will
+        // ever answer the prompt, and until it clears the card is showing
+        // a question instead of the state of the house.
+        assert!(w.arm_expired(now + ARM_TIMEOUT));
+    }
 }

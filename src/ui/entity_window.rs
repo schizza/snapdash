@@ -3,7 +3,7 @@ use iced::{Alignment, Element, Length};
 
 use super::components;
 use crate::app::{EntityWindowState, Message};
-use crate::ha::ActionKind;
+use crate::ha::{ActionKind, ContinuousControl, ContinuousKind};
 use crate::theme::{Palette, metric};
 use crate::ui::components::IconVisual;
 use crate::ui::format::format_entity_value;
@@ -32,6 +32,159 @@ fn status_line(p: Palette, connected: bool) -> Element<'static, Message> {
         .into()
 }
 
+/// Card body for a widget awaiting confirmation (#85).
+///
+/// Replaces the value rather than floating above it, so the question
+/// stays welded to the thing being acted on instead of drifting into a
+/// detached dialog. At the Small preset there is room for a short prompt
+/// and two icons and nothing else, which is why this is terse.
+///
+/// The affirmative is red because the gate only exists for actions the
+/// user called risky; the way out is unemphasised so it does not compete.
+///
+/// `gap` is the card's own title gap rather than the page-level
+/// `metric::GAP`: at 12px between the question and the buttons, the
+/// prompt is taller than the body of a Small card, and a column that
+/// overflows its limits does not spill in iced, it hands its last child
+/// whatever is left. That was zero, so the two icons laid out inside a
+/// zero-height box and their glyphs were clipped away entirely.
+fn confirm_prompt<'a>(entity_id: &str, font: f32, gap: f32, p: Palette) -> Element<'a, Message> {
+    let confirm = |confirmed: bool| Message::WidgetActionConfirmed {
+        entity_id: entity_id.to_owned(),
+        confirmed,
+    };
+
+    let buttons = row![
+        components::icon_button(
+            Icon::Play,
+            components::tooltip_message("Confirm", crate::ui::theme::MessageType::Warning, p),
+            Some(p.danger),
+            Some(font),
+            confirm(true),
+            IconVisual::danger(p),
+            p,
+        ),
+        components::icon_button(
+            Icon::Close,
+            components::tooltip_message("Cancel", crate::ui::theme::MessageType::Info, p),
+            Some(p.text_secondary),
+            Some(font),
+            confirm(false),
+            IconVisual::neutral(p),
+            p,
+        ),
+    ]
+    .spacing(metric::GAP)
+    .align_y(Alignment::Center);
+
+    let prompt =
+        text("Confirm?")
+            .size(font)
+            .style(move |_: &iced::Theme| iced::widget::text::Style {
+                color: Some(p.text_secondary),
+            });
+
+    iced::widget::container(
+        column![prompt, buttons]
+            .spacing(gap)
+            .align_x(Alignment::Center),
+    )
+    .center_x(Length::Fill)
+    .center_y(Length::Fill)
+    .into()
+}
+
+/// Human-facing value for the current slider position.
+///
+/// Brightness is stored 0-255 on the wire but means nothing to a user in
+/// those units, so it reads as a percentage. Position is already a
+/// percentage. A setpoint keeps its own scale, and its step decides
+/// whether a decimal is worth showing.
+fn readout(control: &ContinuousControl, value: f32) -> String {
+    match control.kind {
+        ContinuousKind::Brightness => {
+            let pct = (value / control.max * 100.0).round();
+            format!("{pct:.0}%")
+        }
+        // Kelvin is the unit users actually see on a bulb's box, so it
+        // is shown as-is rather than rescaled to a percentage.
+        ContinuousKind::ColorTemp => format!("{:.0}K", value.round()),
+        ContinuousKind::Position => format!("{:.0}%", value.round()),
+        ContinuousKind::Temperature => {
+            if control.step < 1.0 {
+                format!("{value:.1}°")
+            } else {
+                format!("{value:.0}°")
+            }
+        }
+    }
+}
+
+fn axis_label(kind: ContinuousKind) -> &'static str {
+    match kind {
+        ContinuousKind::Brightness => "Brightness",
+        ContinuousKind::ColorTemp => "White",
+        ContinuousKind::Temperature => "Target",
+        ContinuousKind::Position => "Position",
+    }
+}
+
+/// One axis inside an expanded widget: a label with its readout, and the
+/// slider beneath.
+///
+/// The slider renders the *pending* value whenever the user is driving
+/// it, falling back to what HA reported once the interaction reconciles.
+/// Falling back to `min` keeps the slider in range for an entity that
+/// reports no value at all, such as an unavailable light with no
+/// brightness. See `crate::app::pending`.
+fn control_row<'a>(
+    entity_id: &str,
+    control: &ContinuousControl,
+    pending: Option<f32>,
+    font: f32,
+    p: Palette,
+) -> Element<'a, Message> {
+    let value = pending
+        .or(control.current)
+        .unwrap_or(control.min)
+        .clamp(control.min, control.max);
+
+    let label = text(axis_label(control.kind))
+        .size(font)
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(p.text_dim),
+        });
+
+    let value_text = text(readout(control, value))
+        .size(font)
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(p.text_secondary),
+        });
+
+    let axis = control.kind;
+    let bar = iced::widget::slider(control.min..=control.max, value, {
+        let entity_id = entity_id.to_owned();
+        move |value: f32| Message::ControlValueChanged {
+            entity_id: entity_id.clone(),
+            axis,
+            value,
+        }
+    })
+    .step(control.step)
+    .on_release(Message::ControlReleased {
+        entity_id: entity_id.to_owned(),
+        axis,
+    });
+
+    column![
+        row![label, space().width(Length::Fill), value_text].align_y(Alignment::Center),
+        bar,
+    ]
+    .spacing(4)
+    .width(Length::Fill)
+    .into()
+}
+
 /// Ring pulse color for the card border.
 ///
 /// Normal/Low widgets rest faint and flash to accent on a state update
@@ -50,15 +203,38 @@ fn pulse_border(p: Palette, pulse: f32, priority: Priority) -> iced::Color {
     iced::Color { a, ..p.accent }
 }
 
-pub fn view(
-    state: &EntityWindowState,
-    p: Palette,
-    connected: bool,
-    update: bool,
-    widget_settings: crate::config::WidgetSettings,
-    priority: Priority,
-    title: String,
-) -> Element<'_, Message> {
+/// Everything the widget card needs to render itself.
+///
+/// Bundled rather than passed as a parameter list because the card grew
+/// past what a positional signature can carry legibly once the expand
+/// chevron and its controls arrived, and every future axis adds more.
+pub struct WidgetView<'a> {
+    pub state: &'a EntityWindowState,
+    pub palette: Palette,
+    pub connected: bool,
+    pub update_available: bool,
+    pub settings: crate::config::WidgetSettings,
+    pub priority: Priority,
+    pub title: String,
+    /// Every axis this entity exposes, each paired with the locally-held
+    /// value if the user is currently driving it. A pending value wins
+    /// over whatever HA last reported. A non-empty list is what earns
+    /// the widget its expand chevron.
+    pub axes: Vec<(ContinuousControl, Option<f32>)>,
+}
+
+pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
+    let WidgetView {
+        state,
+        palette: p,
+        connected,
+        update_available: update,
+        settings: widget_settings,
+        priority,
+        title,
+        axes,
+    } = ctx;
+
     let (_friendly, main_opt, detail) = format_main_value(state);
 
     let update_button = components::icon_button(
@@ -76,30 +252,42 @@ pub fn view(
         .interaction(iced::mouse::Interaction::Pointer)
         .into();
 
-    // Actionable widget affordance (issue #81, Phase 1). When the entity's
-    // domain is one of the five MVP-supported ones (switch/light/scene/
-    // script/input_boolean) AND we're currently connected to HA, render a
-    // small accent-colored button in the widget's top-right corner. Tap →
-    // REST `call_service` to HA. Placed before the update icon so when
-    // both are present the update alert stays rightmost (matches existing
-    // priority: system health first).
+    // Actionable widget affordance (issue #81). When the entity's domain
+    // is one of the five supported ones (switch/light/scene/script/
+    // input_boolean) AND we're currently connected to HA, render a small
+    // accent-colored button in the header. Tap fires a REST
+    // `call_service`, or arms the widget when its confirmation gate is on
+    // (#85). Placed before the update icon so when both are present the
+    // update alert stays rightmost (matches existing priority: system
+    // health first).
+    //
+    // This is the *only* way to fire the action: the card body is the
+    // drag handle, deliberately, per
+    // `docs/adr/0001-widget-interaction-model.md`.
     //
     // Hiding the button while disconnected keeps the UI honest: no dead
     // affordance, and no way for a mid-reconnect tap to fire a REST call
     // that would fight the WS handshake still in progress. The handler
     // guards the same condition; this just makes the intent visible.
     let action_kind = connected
-        .then(|| ActionKind::from_entity_id(&state.entity_id))
+        .then(|| ActionKind::primary_for_entity(&state.entity_id))
         .flatten();
-    let action_button: Option<Element<Message>> = action_kind.map(|action| {
+    let action_button: Option<Element<Message>> = action_kind.and_then(|action| {
         let (icon, tooltip) = match action {
             ActionKind::ToggleSwitch => (Icon::Toggle, "Toggle switch"),
             ActionKind::ToggleLight => (Icon::Toggle, "Toggle light"),
             ActionKind::TriggerScene => (Icon::Play, "Activate scene"),
             ActionKind::TriggerScript => (Icon::Play, "Run script"),
             ActionKind::ToggleInputBoolean => (Icon::Toggle, "Toggle input"),
+            // Value-carrying actions are built from a control, never
+            // from an entity id, so `primary_for_entity` cannot hand one
+            // back here and there is no header affordance for them.
+            ActionKind::SetBrightness(_)
+            | ActionKind::SetColorTemp(_)
+            | ActionKind::SetTemperature(_)
+            | ActionKind::SetPosition(_) => return None,
         };
-        components::icon_button(
+        Some(components::icon_button(
             icon,
             components::tooltip_message(tooltip, crate::ui::theme::MessageType::Info, p),
             Some(p.accent),
@@ -110,7 +298,7 @@ pub fn view(
             },
             IconVisual::accent(p),
             p,
-        )
+        ))
     });
 
     let title_widget = text(title)
@@ -123,6 +311,29 @@ pub fn view(
 
     if let Some(button) = action_button {
         title_text = title_text.push(button);
+    }
+
+    // The expand chevron, next to the action icon (#87). Both stay
+    // visible at rest: the action icon is the signal that this widget
+    // does something, and the chevron the signal that it has a value
+    // worth adjusting. Gated on `connected` for the same reason the
+    // action is, a control that cannot reach HA would swallow drags.
+    if !axes.is_empty() && connected {
+        let (icon, tooltip) = if state.is_expanded() {
+            (Icon::ChevronUp, "Hide controls")
+        } else {
+            (Icon::ChevronDown, "Adjust value")
+        };
+
+        title_text = title_text.push(components::icon_button(
+            icon,
+            components::tooltip_message(tooltip, crate::ui::theme::MessageType::Info, p),
+            Some(p.accent),
+            Some(widget_settings.widget_size.title_font()),
+            Message::ToggleWidgetControls(state.entity_id.clone()),
+            IconVisual::accent(p),
+            p,
+        ));
     }
 
     if update {
@@ -181,30 +392,71 @@ pub fn view(
         inner_column = inner_column.push(title_text);
         inner_column =
             inner_column.push(space().height(widget_settings.widget_size.title_value_gap()));
-        inner_column = inner_column.push(
+        // An armed widget shows the question instead of the value. It is
+        // the one state where the card deliberately stops mirroring the
+        // house, which is why being armed is on a clock (#85).
+        let armed = state.armed_at.is_some();
+
+        let body: Element<Message> = if armed {
+            confirm_prompt(
+                &state.entity_id,
+                widget_settings.widget_size.title_font(),
+                widget_settings.widget_size.title_value_gap(),
+                p,
+            )
+        } else {
             iced::widget::container(value_text)
                 .height(Length::Fill)
-                .width(Length::Fill),
-        );
-        inner_column =
-            inner_column.push(space().height(widget_settings.widget_size.value_detail_gap()));
-
-        let detail_line = if widget_settings.widget_size == WidgetSize::Small
-            || !widget_settings.show_measurement_info
-        {
-            space().height(0).width(0).into()
-        } else {
-            detail_line
+                .width(Length::Fill)
+                .into()
         };
 
-        let status_line = row![status_line(p, connected), detail_line]
-            .spacing(metric::GAP)
-            .height(Length::Fill)
-            .height(Length::Fill)
-            .align_y(Alignment::End);
+        inner_column = inner_column.push(body);
 
-        //        inner_column = inner_column.push(detail_line);
-        inner_column = inner_column.push(status_line);
+        // The status line is the other half of the card's vertical
+        // budget, and while the question is up the prompt needs all of
+        // it: a Small card has around 27px to give each of two `Fill`
+        // children, and the question plus its buttons do not fit in
+        // that. A widget that has stopped mirroring the house for five
+        // seconds can stop showing its connection dot for the same five
+        // seconds, and the modal card is cleaner for it (#85).
+        if !armed {
+            inner_column =
+                inner_column.push(space().height(widget_settings.widget_size.value_detail_gap()));
+
+            let detail_line = if widget_settings.widget_size == WidgetSize::Small
+                || !widget_settings.show_measurement_info
+            {
+                space().height(0).width(0).into()
+            } else {
+                detail_line
+            };
+
+            let status_line = row![status_line(p, connected), detail_line]
+                .spacing(metric::GAP)
+                .height(Length::Fill)
+                .align_y(Alignment::End);
+
+            inner_column = inner_column.push(status_line);
+        }
+
+        // The controls sit below the status line, in the height the
+        // window grew by. They are part of the widget rather than a
+        // window of their own, so they cannot drift away from the value
+        // they belong to (#87).
+        if state.is_expanded() {
+            for (control, pending) in &axes {
+                inner_column = inner_column
+                    .push(space().height(widget_settings.widget_size.value_detail_gap()));
+                inner_column = inner_column.push(control_row(
+                    &state.entity_id,
+                    control,
+                    *pending,
+                    widget_settings.widget_size.detail_font(),
+                    p,
+                ));
+            }
+        }
 
         inner_column
     };

@@ -1,4 +1,32 @@
 use crate::helpers::humanize_magnitude;
+use crate::widget_size::WidgetSize;
+
+/// An entity with no axis has no controls to reveal, so there is nothing
+/// to grow into and the widget stays at its preset.
+#[test]
+fn an_entity_with_no_axes_grows_by_nothing() {
+    for &size in WidgetSize::ALL {
+        assert_eq!(size.controls_height(0), 0.0, "{size}");
+    }
+}
+
+/// `entity_window` puts a separating gap in front of every control row,
+/// so the height each axis costs is the gap plus the row. A widget that
+/// counted one gap for the whole block came up short as soon as it had a
+/// second axis, and the last slider paid for it.
+#[test]
+fn every_axis_costs_its_own_gap() {
+    for &size in WidgetSize::ALL {
+        let one = size.controls_height(1);
+        assert_eq!(
+            one,
+            size.value_detail_gap() + size.control_row_height(),
+            "{size}"
+        );
+        assert_eq!(size.controls_height(2), one * 2.0, "{size}");
+        assert_eq!(size.controls_height(3), one * 3.0, "{size}");
+    }
+}
 
 #[test]
 fn compresses_large_watts() {
