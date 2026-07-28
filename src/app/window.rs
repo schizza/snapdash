@@ -99,15 +99,11 @@ pub struct EntityWindowState {
     pub armed_at: Option<std::time::Instant>,
     /// Set while the widget is grown out of its size preset to show its
     /// continuous controls (#87), `None` when it sits at preset size.
-    pub expansion: Option<Expansion>,
-    /// Swallows exactly one `Moved` event, for when Snapdash moved the
-    /// window itself rather than the user dragging it.
     ///
-    /// Expanding near the bottom of the screen lifts the window, and
-    /// collapsing puts it back. Neither is the user repositioning their
-    /// widget, so neither may be written to config.json: without this a
-    /// widget would wander up the screen every time it was opened.
-    pub ignore_next_move: bool,
+    /// Also the record of how far the window had to be lifted to fit, so
+    /// a `Moved` arriving while it is up can be corrected back to the
+    /// position the collapsed card will occupy. See `Message::WidgetMoved`.
+    pub expansion: Option<Expansion>,
 }
 
 /// How long an armed widget waits before disarming itself.
@@ -136,6 +132,23 @@ impl EntityWindowState {
 
     pub fn is_expanded(&self) -> bool {
         self.expansion.is_some()
+    }
+
+    /// Where this widget belongs, given where its window currently is.
+    ///
+    /// config.json stores the position of the *collapsed* card, because
+    /// that is the only one that survives the session. A widget expanded
+    /// near the bottom edge is sitting `lifted_by` pixels above its own
+    /// place, so that much is added back before the position is written.
+    ///
+    /// Correcting rather than ignoring the move is what lets the user
+    /// drag a widget while its controls are up: the drag is theirs and it
+    /// is kept, at the place the card will occupy once they are dismissed,
+    /// which is exactly where collapsing then puts it.
+    pub fn resting_position(&self, position: iced::Point) -> iced::Point {
+        let lifted_by = self.expansion.map_or(0.0, |expansion| expansion.lifted_by);
+
+        iced::Point::new(position.x, position.y + lifted_by)
     }
 }
 
@@ -204,6 +217,53 @@ mod tests {
             armed_at,
             ..Default::default()
         }
+    }
+
+    fn expanded(lifted_by: f32) -> EntityWindowState {
+        EntityWindowState {
+            entity_id: "light.kitchen".into(),
+            expansion: Some(Expansion {
+                grown_by: 92.0,
+                lifted_by,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// A widget that never left its preset size is already where it
+    /// belongs, so its position is written through untouched.
+    #[test]
+    fn a_widget_at_rest_is_persisted_where_it_is() {
+        let at = iced::Point::new(300.0, 200.0);
+        assert_eq!(widget(None).resting_position(at), at);
+        assert_eq!(expanded(0.0).resting_position(at), at, "grew downwards");
+    }
+
+    /// A widget lifted to make room is sitting above its own place. What
+    /// belongs in config is where the collapsed card will be, or the
+    /// widget climbs the screen a little further every time it is opened.
+    #[test]
+    fn a_lifted_widget_is_persisted_where_it_will_land() {
+        assert_eq!(
+            expanded(140.0).resting_position(iced::Point::new(300.0, 800.0)),
+            iced::Point::new(300.0, 940.0)
+        );
+    }
+
+    /// Dragging a widget while its controls are up is the user
+    /// repositioning it, and that drag is theirs to keep. It is persisted
+    /// at the place the card will occupy once they are dismissed, which is
+    /// exactly where `collapse_widget` then moves the window.
+    #[test]
+    fn dragging_an_expanded_widget_persists_where_collapsing_will_put_it() {
+        let dragged_to = iced::Point::new(120.0, 500.0);
+        let lifted_by = 140.0;
+
+        let resting = expanded(lifted_by).resting_position(dragged_to);
+
+        // `collapse_widget` gives the lift back relative to where the
+        // window is now, so the two have to agree.
+        assert_eq!(resting.y, dragged_to.y + lifted_by);
     }
 
     /// Room below: the widget grows downwards and stays put.

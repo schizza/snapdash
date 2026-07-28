@@ -545,14 +545,21 @@ impl Snapdash {
         let Some(expansion) = win.entity.expansion.take() else {
             return Task::none();
         };
-        // The move below is ours, not the user's, so it must not be
-        // mistaken for them repositioning the widget.
-        win.entity.ignore_next_move = expansion.lifted_by > 0.0;
 
         // The pending value belongs to the interaction, and the
         // interaction just ended. Keeping it would leave the card showing
         // a number HA never confirmed with no control left to correct it.
         self.pending.clear(entity_id);
+
+        // Echoes that arrived mid-interaction updated the entity store but
+        // deliberately did not reach the card, so `last` is now older than
+        // what we know. Clearing also stops the expiry tick, so nothing
+        // else is coming: push the latest truth across by hand, exactly as
+        // `PendingTick` does for a value that timed out. Without this a
+        // quiet entity leaves the collapsed card on its pre-drag value.
+        if let Some(state) = self.ha.entities.get(entity_id).cloned() {
+            self.set_window_entity_state(entity_id, &state, false);
+        }
 
         // Through the platform helper, so Linux keeps its SHADOW_MARGIN
         // inflation. Resizing with the raw card size would clip the
@@ -1690,7 +1697,6 @@ impl Snapdash {
                     grown_by,
                     lifted_by,
                 });
-                win.entity.ignore_next_move = lifted_by > 0.0;
 
                 let grow = iced::window::resize::<Message>(
                     id,
@@ -1734,13 +1740,20 @@ impl Snapdash {
             }
 
             Message::ControlReleased { entity_id, axis } => {
-                let Some(connection) = self.live_connection() else {
-                    return Task::none();
-                };
+                // The bookkeeping happens whether or not HA is reachable,
+                // and before the connection is checked. `release` is what
+                // starts the settle window, and a pending value that never
+                // got one can never expire: the card would keep showing a
+                // number the house never confirmed, with nothing left to
+                // correct it. Only the service call needs a live socket.
                 let Some(value) = self
                     .pending
                     .release(&entity_id, axis, std::time::Instant::now())
                 else {
+                    return Task::none();
+                };
+
+                let Some(connection) = self.live_connection() else {
                     return Task::none();
                 };
 
@@ -1853,15 +1866,11 @@ impl Snapdash {
                     return Task::none();
                 };
 
-                // Expanding near the bottom edge lifts the window, and
-                // collapsing puts it back. Those are ours, not the user
-                // repositioning their widget, so they must not reach
-                // config.json: otherwise a widget would climb the screen
-                // a little further every time it was opened (#87).
-                if window.entity.ignore_next_move {
-                    window.entity.ignore_next_move = false;
-                    return Task::none();
-                }
+                // Expanding near the bottom edge lifts the window out of
+                // the place it belongs, so what gets persisted is where
+                // the collapsed card lives rather than where the window
+                // happens to be right now (#87).
+                let resting = window.entity.resting_position(position);
 
                 let WindowKind::Entity { entity_id } = &window.kind else {
                     return Task::none();
@@ -1869,8 +1878,8 @@ impl Snapdash {
 
                 let entity_id = entity_id.clone();
                 let new_position = WidgetPosition {
-                    x: position.x,
-                    y: position.y,
+                    x: resting.x,
+                    y: resting.y,
                 };
 
                 // Filter: if position is not moved - do nothing. Without filter we will fire

@@ -182,12 +182,15 @@ impl PendingValues {
             }
         }
 
-        let still_waiting = self.axes.keys().any(|(id, _)| id == entity_id);
-        if !still_waiting {
-            self.last_send_at.remove(entity_id);
-        }
-
-        !still_waiting
+        // The throttle timestamp deliberately outlives the interaction it
+        // was set by. On a LAN the echo comes back well inside
+        // `SEND_INTERVAL`, so clearing it here would let every echo reopen
+        // the window mid-drag and the call rate would track the UI event
+        // rate instead of the ~5/sec ADR-0003 is costed against. It is
+        // dropped once the interaction is truly over, in [`Self::expire`]
+        // and [`Self::clear`], and a stale one can only ever throttle, it
+        // can never let an extra call through.
+        !self.axes.keys().any(|(id, _)| id == entity_id)
     }
 
     /// Drop every pending value whose settle window has run out, so HA
@@ -370,6 +373,59 @@ mod tests {
 
         assert!(p.reconcile("light.a", &[(TEMP, Some(3000.0))]));
         assert!(p.is_empty());
+    }
+
+    /// Home Assistant echoes in tens of milliseconds on a LAN, well
+    /// inside `SEND_INTERVAL`. If reconciling reopened the entity's
+    /// throttle window, every echo would let the next slider event
+    /// straight through and the call rate would track the user's finger
+    /// rather than the ~5/sec ADR-0003 is costed against.
+    #[test]
+    fn an_echo_mid_drag_does_not_reopen_the_throttle() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        assert_eq!(p.set("light.a", BRIGHTNESS, 100.0, now), Some(100.0));
+
+        // HA confirms almost immediately, so the axis is no longer waiting.
+        assert!(p.reconcile("light.a", &[(BRIGHTNESS, Some(100.0))]));
+        assert!(p.is_empty());
+
+        // The user has not let go, and the window has not elapsed.
+        assert_eq!(
+            p.set(
+                "light.a",
+                BRIGHTNESS,
+                120.0,
+                now + Duration::from_millis(30)
+            ),
+            None,
+            "the echo must not have reopened the window"
+        );
+
+        assert_eq!(
+            p.set("light.a", BRIGHTNESS, 140.0, now + SEND_INTERVAL),
+            Some(140.0),
+            "and it still opens on time"
+        );
+    }
+
+    /// Once the interaction is genuinely over the timestamp goes, so a
+    /// widget picked up much later is not throttled by a stale one. Both
+    /// exits have to do it: the settle timeout and an explicit clear.
+    #[test]
+    fn a_finished_interaction_drops_its_throttle() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.release("light.a", BRIGHTNESS, now);
+        assert_eq!(p.expire(now + SETTLE_TIMEOUT), vec!["light.a".to_owned()]);
+        assert!(p.send_due("light.a", now + SETTLE_TIMEOUT));
+
+        p.set("light.b", BRIGHTNESS, 50.0, now);
+        p.clear("light.b");
+        assert!(p.send_due("light.b", now));
     }
 
     #[test]
