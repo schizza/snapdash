@@ -16,6 +16,13 @@
 //! authoritative forever and the widget would quietly lie about the
 //! state of the house.
 //!
+//! Echoes are compared to the last sent value with a tolerance, and
+//! that tolerance belongs to the **axis** rather than being one global
+//! constant. An axis whose value passes through a unit conversion on the
+//! way back does not return the number we sent, and how much it loses is
+//! a fact about that conversion, not about floats. See
+//! [`ContinuousKind::echo_tolerance`].
+//!
 //! State is kept **per axis**, so brightness and colour temperature
 //! reconcile independently and neither overwrites the other. Throttling
 //! is kept **per entity**, so a light with two sliders still peaks at
@@ -38,11 +45,6 @@ pub const SEND_INTERVAL: Duration = Duration::from_millis(200);
 /// How long a released value stays authoritative while waiting for a
 /// matching echo before HA truth is allowed to win again.
 pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// Echoes are compared to the last sent value with a tolerance, because
-/// a setpoint round-trips through HA as a float and may come back with
-/// a different representation than we sent.
-const EPSILON: f32 = 0.01;
 
 /// One axis's in-flight interaction.
 #[derive(Debug, Clone)]
@@ -75,9 +77,13 @@ impl Pending {
 
     /// `true` when this echo is the one we were waiting for, meaning the
     /// axis can go back to being driven by HA.
-    fn reconciles(&self, echoed: f32) -> bool {
+    ///
+    /// `kind` decides how much slack the comparison gets, because the
+    /// round trip through Home Assistant is lossy by different amounts
+    /// for different axes.
+    fn reconciles(&self, kind: ContinuousKind, echoed: f32) -> bool {
         self.last_sent
-            .is_some_and(|sent| (sent - echoed).abs() <= EPSILON)
+            .is_some_and(|sent| (sent - echoed).abs() <= kind.echo_tolerance())
     }
 
     /// `true` once the settle window has run out. Never true while the
@@ -177,7 +183,7 @@ impl PendingValues {
                 continue;
             };
 
-            if value.is_some_and(|value| pending.reconciles(value)) {
+            if value.is_some_and(|value| pending.reconciles(*kind, value)) {
                 self.axes.remove(&key);
             }
         }
@@ -435,6 +441,45 @@ mod tests {
 
         p.set("climate.a", ContinuousKind::Temperature, 21.5, now);
         assert!(p.reconcile("climate.a", &[(ContinuousKind::Temperature, Some(21.502))]));
+    }
+
+    /// A light that stores mireds internally round-trips kelvin through
+    /// `round(1_000_000 / kelvin)` and back, so the echo is never the
+    /// number we sent. 6350 K comes back as 6369 K, the worst case over
+    /// the 50 K grid Snapdash sends. Against the old global 0.01 this
+    /// could not match at all, and the axis ran to the settle timeout on
+    /// every single interaction.
+    #[test]
+    fn colour_temperature_reconciles_across_the_mired_round_trip() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", TEMP, 6350.0, now);
+        assert!(p.reconcile("light.a", &[(TEMP, Some(6369.0))]));
+    }
+
+    /// The slack must stay under the 50 K step, or a stop could be
+    /// confirmed by its neighbour and the slider would silently accept
+    /// a value the user did not ask for.
+    #[test]
+    fn colour_temperature_does_not_reconcile_against_a_neighbouring_stop() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", TEMP, 3000.0, now);
+        assert!(!p.reconcile("light.a", &[(TEMP, Some(3050.0))]));
+        assert_eq!(p.shown("light.a", TEMP), Some(3000.0));
+    }
+
+    /// The slack is colour temperature's, not everybody's. Brightness
+    /// makes the round trip untouched, so 100 is not 110.
+    #[test]
+    fn brightness_keeps_the_tight_tolerance() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", BRIGHTNESS, 100.0, now);
+        assert!(!p.reconcile("light.a", &[(BRIGHTNESS, Some(110.0))]));
     }
 
     #[test]

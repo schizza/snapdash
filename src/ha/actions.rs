@@ -162,6 +162,32 @@ pub enum ContinuousKind {
     Position,
 }
 
+impl ContinuousKind {
+    /// How far an echo may sit from the value we sent and still count as
+    /// confirmation of it.
+    ///
+    /// Not one constant, because the round trip through Home Assistant
+    /// is lossy by different amounts per axis. Brightness, position and
+    /// a setpoint are stored in the units we send, so anything past
+    /// float representation noise is a genuinely different value.
+    ///
+    /// Colour temperature is not: most integrations store mireds and
+    /// round-trip kelvin through `round(1_000_000 / kelvin)` and back,
+    /// which does not return what we sent. Over the 50 K grid Snapdash
+    /// actually sends, the worst case is 19 K (6350 K comes back as
+    /// 6369 K). 25 K clears that comfortably while staying at half the
+    /// step, so it can never confirm a neighbouring stop.
+    pub fn echo_tolerance(self) -> f32 {
+        match self {
+            // A setpoint round-trips through HA as a float and may come
+            // back with a different representation than we sent, which
+            // is all this needs to absorb.
+            Self::Brightness | Self::Temperature | Self::Position => 0.01,
+            Self::ColorTemp => 25.0,
+        }
+    }
+}
+
 /// A numeric dimension of an entity that is *set* rather than toggled,
 /// together with the range needed to render a control for it.
 ///
