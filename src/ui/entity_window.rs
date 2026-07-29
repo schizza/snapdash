@@ -331,11 +331,19 @@ fn colour_block<'a>(
         colour,
         size.colour_field_size().height,
         colour_field::Style {
-            // Flat in this ticket. The spectrum is #06's, and this is
-            // what shows through underneath it.
+            // The plate the spectrum is painted onto, which shows only
+            // through the rounded corners and on the frame before the
+            // texture is resident. It fades with the field so an absent
+            // colour recedes into the card rather than onto a plate.
             fill: fade(p.card_2, opacity),
             marker: fade(iced::Color::WHITE, opacity),
             marker_shadow: fade(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5), opacity),
+            // The one number a slider's rail is faded by, applied to the
+            // surface that stands where a slider's rail would. Colours
+            // are faded by scaling their alpha and a texture cannot be,
+            // so it travels as its own field and the widget hands it to
+            // the renderer.
+            opacity,
         },
         {
             let entity_id = entity_id.to_owned();

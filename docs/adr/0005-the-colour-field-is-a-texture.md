@@ -61,5 +61,9 @@ That is two orders of magnitude better than the gradient it replaces, and it is 
 The marker's position and the texture's geometry are now two statements of the same mapping, and they have to agree.
 Anything that changes the axes has to change both, which is why the extents live as named constants in `ui::colour_texture` rather than as literals at the drawing site.
 
-Scaling is the renderer's, so the field is interpolated up from 256x128 to whatever the widget is.
+Scaling is the renderer's, so the field is resampled from 256x128 to whatever the widget is.
+In practice that is always downwards - the widest preset is 212 points across - and the two shapes are both 2:1, so it is a uniform scale rather than a stretch.
 That is fine for a colour field, where neighbouring pixels are near-identical by construction, and it is the reason the texture can be small enough to keep.
+
+The 2:1 is therefore a shared invariant rather than a coincidence, held in `ui::colour_texture`'s extents at one end and `WidgetSize::colour_field_size` at the other, and asserted across the presets in `widget_size`'s tests.
+Breaking it would not fail to draw; it would quietly stop putting the colour the marker names underneath the marker.

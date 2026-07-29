@@ -20,18 +20,21 @@
 //! the corners of the field and the exact extents of the two axes - are
 //! the cheapest possible assertions once it is out.
 //!
-//! The field is drawn as a flat fill in this ticket. Painting the actual
-//! spectrum into it is #98's texture and #06's drawing, and the geometry
-//! here already agrees with `ui::colour_texture`'s extents so that stays
-//! a small change.
+//! The pixels are `ui::colour_texture`'s, and the only thing this file
+//! knows about them is that they are laid out the way [`colour_at`] maps
+//! a pointer: hue across, saturation down, both inclusive of their ends.
+//! The two are one statement of the same mapping made twice, so they
+//! share the extents rather than each spelling them out
+//! (`docs/adr/0005-the-colour-field-is-a-texture.md`).
 
+use iced::advanced::image;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::widget::{self, Widget, tree};
 use iced::keyboard::{self, Modifiers};
-use iced::{Color, Element, Length, Point, Rectangle, Size, border, mouse, touch};
+use iced::{Color, Element, Length, Point, Radians, Rectangle, Size, border, mouse, touch};
 
-use crate::ui::colour_texture::{MAX_HUE, MAX_SATURATION};
+use crate::ui::colour_texture::{self, MAX_HUE, MAX_SATURATION};
 
 /// The colour under a pointer, given where the field is and where the
 /// gesture started.
@@ -106,15 +109,32 @@ const FIELD_RADIUS: f32 = 8.0;
 /// widget: it knows about pointers and pixels and nothing about themes.
 #[derive(Debug, Clone, Copy)]
 pub struct Style {
-    /// The field's fill. A flat colour in this ticket; #06 replaces it
-    /// with the spectrum, and it stays as what shows through while the
-    /// texture is being uploaded.
+    /// What sits under the spectrum.
+    ///
+    /// The texture is opaque, so on a settled frame this shows only
+    /// through the rounded corners. It matters on the first frame a
+    /// field is drawn: a renderer is entitled to upload an image handle
+    /// in the background and draw nothing until it is resident, and a
+    /// hole the shape of the field flashing into the card is worse than
+    /// a plate of the card's own colour doing so.
     pub fill: Color,
     /// The ring drawn at the current colour.
     pub marker: Color,
     /// A darker ring just outside the bright one, so the marker stays
     /// visible over a pale part of the field.
     pub marker_shadow: Color,
+    /// How much of the field's presence to keep, as 0..=1.
+    ///
+    /// Below 1 the spectrum recedes towards the card behind it, which is
+    /// how an absent colour reads: the same statement a slider makes by
+    /// fading its rail, and made here by fading the surface, because the
+    /// surface is this control's rail (#94).
+    ///
+    /// It is the caller's number rather than something inferred from
+    /// `colour` being `None`, so that the field, the label above it and
+    /// every slider in the same card dim by one shared constant instead
+    /// of by two mechanisms that can drift apart.
+    pub opacity: f32,
 }
 
 /// A two-dimensional colour surface: hue across, saturation down.
@@ -168,10 +188,16 @@ pub fn colour_field<'a, Message>(
     }
 }
 
+/// The renderer a colour field needs: one that can draw a raster image,
+/// which is a strictly stronger requirement than the plain
+/// `renderer::Renderer` the marker and the fill would have been happy
+/// with. Every backend iced ships satisfies it once the crate asks for
+/// the image feature, `tiny-skia` included, which is the whole reason
+/// the field is a texture and not a shader.
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for ColorField<'_, Message>
 where
     Message: Clone,
-    Renderer: renderer::Renderer,
+    Renderer: image::Renderer<Handle = image::Handle>,
 {
     fn size(&self) -> Size<Length> {
         Size {
@@ -311,6 +337,45 @@ where
             self.style.fill,
         );
 
+        // The spectrum, drawn into exactly the bounds the marker is
+        // placed in. `WidgetSize::colour_field_size` is a slider track
+        // wide and half as tall at every preset, and the texture is
+        // computed at 2:1, so this is a uniform scale down in both axes
+        // and a column of the texture stays a column on screen.
+        //
+        // `clip_bounds` is the same rectangle, because the border radius
+        // is applied to the clip rather than to the image: the corners
+        // are rounded by clipping the surface, not by rounding it.
+        //
+        // Only `wgpu` honours that radius. `iced_tiny_skia` carries the
+        // field through its layer and then never reads it, clipping the
+        // raster to a plain rectangle, so on the software fallback the
+        // spectrum has square corners sitting on a rounded plate. It is
+        // set anyway, because it is right where it is read and costs
+        // nothing where it is not, and the divergence is four corners of
+        // a cosmetic radius rather than anything the widget claims about
+        // the light. Opacity, which is the part that carries meaning, is
+        // honoured by both.
+        //
+        // Not snapped to the pixel grid. Snapping would move the surface
+        // by up to half a physical pixel relative to the marker, whose
+        // position comes from these unsnapped bounds, and the marker
+        // agreeing with the colour under it is the entire job here.
+        // Nothing is lost by leaving it off, because a smooth gradient
+        // has no hard edge for the pixel grid to shimmer against.
+        renderer.draw_image(
+            image::Image {
+                handle: colour_texture::handle(),
+                filter_method: image::FilterMethod::Linear,
+                rotation: Radians(0.0),
+                border_radius: FIELD_RADIUS.into(),
+                opacity: self.style.opacity,
+                snap: false,
+            },
+            bounds,
+            bounds,
+        );
+
         let Some((hue, saturation)) = self.colour else {
             return;
         };
@@ -361,7 +426,7 @@ impl<'a, Message, Theme, Renderer> From<ColorField<'a, Message>>
 where
     Message: Clone + 'a,
     Theme: 'a,
-    Renderer: renderer::Renderer + 'a,
+    Renderer: image::Renderer<Handle = image::Handle> + 'a,
 {
     fn from(field: ColorField<'a, Message>) -> Self {
         Self::new(field)

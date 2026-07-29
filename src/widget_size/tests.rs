@@ -1,5 +1,6 @@
 use crate::ha::{Axis, AxisKind, Control};
 use crate::helpers::humanize_magnitude;
+use crate::ui::colour_texture;
 use crate::widget_size::WidgetSize;
 
 fn axis(kind: AxisKind, max: f32) -> Axis {
@@ -41,6 +42,24 @@ fn the_colour_field_is_a_slider_track_wide_and_half_as_tall() {
         WidgetSize::Large.colour_field_size(),
         iced::Size::new(212.0, 106.0)
     );
+}
+
+/// The field is painted by scaling one fixed texture into these bounds,
+/// so the two shapes have to be the same shape. They are stated in two
+/// files that know nothing of each other - the presets here, the pixel
+/// extents in `ui::colour_texture` - and nothing else would notice them
+/// disagreeing: a stretched texture still draws, it just stops putting
+/// the colour it names under the marker, which is the one thing a colour
+/// picker is for.
+#[test]
+fn the_texture_is_the_shape_of_the_field_at_every_preset() {
+    let texture = colour_texture::WIDTH as f32 / colour_texture::HEIGHT as f32;
+
+    for &size in WidgetSize::ALL {
+        let field = size.colour_field_size();
+
+        assert_eq!(field.width / field.height, texture, "{size}");
+    }
 }
 
 /// A colour surface is a field, not a slider, so the window grows by
