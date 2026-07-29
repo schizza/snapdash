@@ -49,7 +49,10 @@ async fn an_axis_home_assistant_reports_as_null_offers_no_value() {
     assert_eq!(controls.len(), 3, "an off light still offers its controls");
     assert_eq!(controls[0].value(0), None, "brightness");
     assert_eq!(controls[1].value(0), None, "colour temperature");
+    // Both axes of the colour surface, which is what stops the marker
+    // being drawn at all.
     assert_eq!(controls[2].value(0), None, "hue");
+    assert_eq!(controls[2].value(1), None, "saturation");
 }
 
 /// The absent value is a reading of the present, not a gap in the
@@ -70,10 +73,11 @@ async fn the_value_comes_back_once_home_assistant_reports_one_again() {
     assert_eq!(controls[0].value(0), Some(172.0), "brightness");
     assert_eq!(controls[1].value(0), Some(2703.0), "colour temperature");
     // Home Assistant derives `hs_color` from the kelvin value while the
-    // light sits in `color_temp` mode, so the hue control has a reading
-    // even though nobody has set a colour: it is the colour the white
-    // the bulb is showing corresponds to.
+    // light sits in `color_temp` mode, so the colour surface has a
+    // reading even though nobody has set a colour: it is the colour the
+    // white the bulb is showing corresponds to.
     assert_eq!(controls[2].value(0), Some(28.391), "hue");
+    assert_eq!(controls[2].value(1), Some(65.659), "saturation");
 }
 
 /// Rendering an axis as absent must not make it inert. Grabbing a
@@ -117,17 +121,23 @@ async fn dragging_an_axis_with_no_value_still_sets_it_and_turns_the_light_on() {
 }
 
 /// The whole path, stated the way a user would: expand a colour light,
-/// drag the hue control, and the bulb changes colour.
+/// drag across the colour field from one point to another, and the bulb
+/// takes the colour under the finger.
 ///
-/// The body is asserted exactly rather than for the presence of
+/// One `light.turn_on` per position and never one per axis. Hue and
+/// saturation reach Home Assistant as the two elements of a single
+/// `hs_color`, so a gesture that sent them separately would be sending
+/// two colours, the first of them one the user never pointed at.
+///
+/// Every body is asserted whole rather than for the presence of
 /// `hs_color`, because "and no other parameter" is the substance of it.
 /// A `light.turn_on` carrying brightness alongside the colour would set
-/// both, and a hue control that quietly also sets brightness is a hue
-/// control that fights the brightness slider above it. Leaving the key
-/// out is what preserves it: `light.turn_on` without `brightness` keeps
+/// both, and a colour surface that quietly also sets brightness is one
+/// that fights the brightness slider above it. Leaving the key out is
+/// what preserves it: `light.turn_on` without `brightness` keeps
 /// whatever the light already had.
 #[tokio::test]
-async fn dragging_hue_posts_hs_color_and_nothing_else() {
+async fn dragging_across_the_colour_field_posts_hs_color_and_nothing_else() {
     let mut harness = Harness::new().await;
     harness
         .state_changed(
@@ -138,16 +148,22 @@ async fn dragging_hue_posts_hs_color_and_nothing_else() {
         .await;
 
     harness
-        .send(Message::ControlValueChanged {
+        .send(Message::ColorChanged {
             entity_id: RGB_ENTITY.to_owned(),
-            axis: AxisKind::Hue,
-            value: 200.0,
+            hue: 100.0,
+            saturation: 50.0,
         })
         .await;
     harness
-        .send(Message::ControlReleased {
+        .send(Message::ColorChanged {
             entity_id: RGB_ENTITY.to_owned(),
-            axis: AxisKind::Hue,
+            hue: 212.0,
+            saturation: 85.0,
+        })
+        .await;
+    harness
+        .send(Message::ColorReleased {
+            entity_id: RGB_ENTITY.to_owned(),
         })
         .await;
 
@@ -157,26 +173,38 @@ async fn dragging_hue_posts_hs_color_and_nothing_else() {
     for (path, body) in &calls {
         assert_eq!(path, "/api/services/light/turn_on");
         assert_eq!(
-            body,
-            &json!({ "entity_id": RGB_ENTITY, "hs_color": [200, 100] })
+            body.as_object().map(serde_json::Map::len),
+            Some(2),
+            "the entity and its colour, and nothing else: {body}"
         );
     }
+
+    assert_eq!(
+        calls.first().map(|(_, body)| body),
+        Some(&json!({ "entity_id": RGB_ENTITY, "hs_color": [100, 50] })),
+        "where the drag started"
+    );
+    assert_eq!(
+        calls.last().map(|(_, body)| body),
+        Some(&json!({ "entity_id": RGB_ENTITY, "hs_color": [212, 85] })),
+        "where it ended, flushed by the release however the throttle fell"
+    );
 }
 
 /// The other half of the round trip: Home Assistant answers, and the
 /// control goes back to showing the house rather than the finger.
 ///
-/// The echo is not the number Snapdash sent. This light stores 8-bit
-/// RGB, so hue 200 is written as `rgb(0, 169, 255)` and read back as
-/// 200.235 - and that is the value the control must end up showing,
-/// because it is what the bulb is actually doing.
+/// The echo is not the pair Snapdash sent. This light stores 8-bit RGB,
+/// so `(212, 85)` is written as `rgb(38, 139, 255)` and read back as
+/// `(212.074, 85.098)` - and that is what the control must end up
+/// showing, because it is what the bulb is actually doing.
 ///
 /// Nothing here advances a clock. The reconciliation happens on the
 /// strength of the echo alone, which is the difference between a control
 /// that hands back in one round trip and one that sits on a local value
 /// for the two seconds of the settle window on every single drag.
 #[tokio::test]
-async fn the_echo_from_an_rgb_light_hands_the_hue_straight_back() {
+async fn the_echo_from_an_rgb_light_hands_the_colour_straight_back() {
     let mut harness = Harness::new().await;
     harness
         .state_changed(
@@ -187,21 +215,20 @@ async fn the_echo_from_an_rgb_light_hands_the_hue_straight_back() {
         .await;
 
     harness
-        .send(Message::ControlValueChanged {
+        .send(Message::ColorChanged {
             entity_id: RGB_ENTITY.to_owned(),
-            axis: AxisKind::Hue,
-            value: 200.0,
+            hue: 212.0,
+            saturation: 85.0,
         })
         .await;
     harness
-        .send(Message::ControlReleased {
+        .send(Message::ColorReleased {
             entity_id: RGB_ENTITY.to_owned(),
-            axis: AxisKind::Hue,
         })
         .await;
     assert_eq!(
         axis_value(&harness, RGB_ENTITY, AxisKind::Hue),
-        Some(200.0),
+        Some(212.0),
         "held locally until the echo arrives"
     );
 
@@ -209,7 +236,7 @@ async fn the_echo_from_an_rgb_light_hands_the_hue_straight_back() {
         .state_changed(
             RGB_ENTITY,
             "on",
-            rgb_light_attributes([0, 169, 255], [200.235, 100.0], [0.144, 0.202]),
+            rgb_light_attributes([38, 139, 255], [212.074, 85.098], [0.149, 0.156]),
         )
         .await;
 
@@ -219,18 +246,120 @@ async fn the_echo_from_an_rgb_light_hands_the_hue_straight_back() {
     );
     assert_eq!(
         axis_value(&harness, RGB_ENTITY, AxisKind::Hue),
-        Some(200.235),
+        Some(212.074),
+        "Home Assistant's number, not the one we sent"
+    );
+    assert_eq!(
+        axis_value(&harness, RGB_ENTITY, AxisKind::Saturation),
+        Some(85.098)
+    );
+}
+
+/// The case a numeric hue tolerance cannot survive, and the reason the
+/// comparison moved into the control and into RGB.
+///
+/// At saturation 1 an eight-bit colour barely determines a hue at all:
+/// `(212, 1)` is stored as `rgb(252, 254, 255)` and read straight back
+/// as hue **200**, twelve degrees from what was sent. As a colour those
+/// two are the same three bytes, so comparing colours confirms it in one
+/// round trip where comparing degrees could only ever time out.
+#[tokio::test]
+async fn an_echo_at_the_lowest_saturation_still_confirms() {
+    let mut harness = Harness::new().await;
+    harness
+        .state_changed(
+            RGB_ENTITY,
+            "on",
+            rgb_light_attributes([255, 170, 0], [40.0, 100.0], [0.555, 0.422]),
+        )
+        .await;
+
+    harness
+        .send(Message::ColorChanged {
+            entity_id: RGB_ENTITY.to_owned(),
+            hue: 212.0,
+            saturation: 1.0,
+        })
+        .await;
+    harness
+        .send(Message::ColorReleased {
+            entity_id: RGB_ENTITY.to_owned(),
+        })
+        .await;
+
+    harness
+        .state_changed(
+            RGB_ENTITY,
+            "on",
+            rgb_light_attributes([252, 254, 255], [200.0, 1.176], [0.32, 0.328]),
+        )
+        .await;
+
+    assert!(
+        harness.app.pending.is_empty(),
+        "twelve degrees out and still the colour that was sent"
+    );
+    assert_eq!(
+        axis_value(&harness, RGB_ENTITY, AxisKind::Hue),
+        Some(200.0),
         "Home Assistant's number, not the one we sent"
     );
 }
 
-/// A colour light that is off reports `hs_color` as null, so its hue
-/// control renders as absent (#94) - and is still the way to give the
+/// A colour the user did not pick must not end the interaction. Here
+/// the bulb answers with a colour ten degrees away at full saturation,
+/// which is four eight-bit levels of blue - far outside anything
+/// quantisation can account for.
+#[tokio::test]
+async fn a_genuinely_different_colour_does_not_confirm() {
+    let mut harness = Harness::new().await;
+    harness
+        .state_changed(
+            RGB_ENTITY,
+            "on",
+            rgb_light_attributes([255, 170, 0], [40.0, 100.0], [0.555, 0.422]),
+        )
+        .await;
+
+    harness
+        .send(Message::ColorChanged {
+            entity_id: RGB_ENTITY.to_owned(),
+            hue: 200.0,
+            saturation: 100.0,
+        })
+        .await;
+    harness
+        .send(Message::ColorReleased {
+            entity_id: RGB_ENTITY.to_owned(),
+        })
+        .await;
+
+    harness
+        .state_changed(
+            RGB_ENTITY,
+            "on",
+            rgb_light_attributes([0, 128, 255], [210.0, 100.0], [0.156, 0.163]),
+        )
+        .await;
+
+    assert!(
+        !harness.app.pending.is_empty(),
+        "the house is showing a colour nobody asked for"
+    );
+    assert_eq!(
+        axis_value(&harness, RGB_ENTITY, AxisKind::Hue),
+        Some(200.0),
+        "still the user's colour, until the settle window says otherwise"
+    );
+}
+
+/// A colour light that is off reports `hs_color` as null, so its colour
+/// surface renders as absent (#94) - and is still the way to give the
 /// light a colour. `light.turn_on` carrying `hs_color` is also what
 /// turns the light on, so there is no "on first, then colour" step to
 /// get wrong.
 #[tokio::test]
-async fn dragging_hue_on_a_light_that_is_off_turns_it_on() {
+async fn dragging_the_colour_field_on_a_light_that_is_off_turns_it_on() {
     let mut harness = Harness::new().await;
     harness
         .state_changed(ENTITY, "off", light_off_attributes())
@@ -242,16 +371,15 @@ async fn dragging_hue_on_a_light_that_is_off_turns_it_on() {
     );
 
     harness
-        .send(Message::ControlValueChanged {
+        .send(Message::ColorChanged {
             entity_id: ENTITY.to_owned(),
-            axis: AxisKind::Hue,
-            value: 275.0,
+            hue: 275.0,
+            saturation: 60.0,
         })
         .await;
     harness
-        .send(Message::ControlReleased {
+        .send(Message::ColorReleased {
             entity_id: ENTITY.to_owned(),
-            axis: AxisKind::Hue,
         })
         .await;
 
@@ -260,11 +388,42 @@ async fn dragging_hue_on_a_light_that_is_off_turns_it_on() {
     assert!(!calls.is_empty(), "an absent axis is still operable");
     for (path, body) in &calls {
         assert_eq!(path, "/api/services/light/turn_on");
-        assert_eq!(
-            body,
-            &json!({ "entity_id": ENTITY, "hs_color": [275, 100] })
-        );
+        assert_eq!(body, &json!({ "entity_id": ENTITY, "hs_color": [275, 60] }));
     }
+}
+
+/// A bulb with no colour mode has no colour surface to offer, whatever
+/// else it can do. Discovery keys on `supported_color_modes`, so a
+/// dimmable white light gets a brightness slider and nothing else.
+#[tokio::test]
+async fn a_light_with_no_colour_mode_offers_no_colour_surface() {
+    let mut harness = Harness::new().await;
+    harness
+        .state_changed(
+            "light.hallway",
+            "on",
+            json!({
+                "supported_color_modes": ["brightness"],
+                "color_mode": "brightness",
+                "brightness": 128,
+                "friendly_name": "Hallway",
+                "supported_features": 0
+            }),
+        )
+        .await;
+
+    let controls = harness.app.control_views("light.hallway");
+
+    assert_eq!(controls.len(), 1, "brightness alone");
+    assert_eq!(
+        axis_value(&harness, "light.hallway", AxisKind::Hue),
+        None,
+        "no hue axis exists to have a value"
+    );
+    assert_eq!(
+        axis_value(&harness, "light.hallway", AxisKind::Saturation),
+        None
+    );
 }
 
 /// While the user drives it, the control shows the local value even

@@ -39,12 +39,17 @@ chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
 # so none of the `image` crate's format decoders are wanted. The plain
 # `image` feature turns them all on and drags PNG, JPEG, GIF and the
 # rest into the binary for nothing.
+# `advanced` for `iced::advanced::Widget`: the colour surface is a
+# widget of our own, because a slider cannot express two axes and a
+# `mouse_area` cannot say *where* inside itself it was pressed. See
+# `ui::colour_field`.
 iced = { version = "0.14.0", features = [
     "wgpu",
     "tokio",
     "markdown",
     "sysinfo",
     "image-without-codecs",
+    "advanced",
 ] }
 iced_winit = { version = "0.14.0", features = ["sysinfo"] }
 directories = "6.0.0"

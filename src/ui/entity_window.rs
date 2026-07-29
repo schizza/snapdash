@@ -5,6 +5,7 @@ use super::components;
 use crate::app::{EntityWindowState, Message};
 use crate::ha::{ActionKind, Axis, AxisKind, Control};
 use crate::theme::{Palette, metric};
+use crate::ui::colour_field;
 use crate::ui::components::IconVisual;
 use crate::ui::format::format_entity_value;
 use crate::ui::icon::Icon;
@@ -109,9 +110,13 @@ fn readout(control: &Axis, value: f32) -> String {
         // Kelvin is the unit users actually see on a bulb's box, so it
         // is shown as-is rather than rescaled to a percentage.
         AxisKind::ColorTemp => format!("{:.0}K", value.round()),
-        // Degrees around the wheel, which is the unit the value is in and
-        // the only one it has. A percentage of 359 would mean nothing.
+        // Degrees around the wheel and percent of colour, which are the
+        // units these values are in. Neither is read by a block of its
+        // own: the colour surface states both at once, in
+        // [`colour_block`], because a colour is one value with two
+        // components rather than two values shown together.
         AxisKind::Hue => format!("{:.0}°", value.round()),
+        AxisKind::Saturation => format!("{:.0}%", value.round()),
         AxisKind::Position => format!("{:.0}%", value.round()),
         AxisKind::Temperature => {
             if control.step < 1.0 {
@@ -127,7 +132,12 @@ fn axis_label(kind: AxisKind) -> &'static str {
     match kind {
         AxisKind::Brightness => "Brightness",
         AxisKind::ColorTemp => "White",
+        // Neither of these heads a block of its own: they are the two
+        // axes of the colour surface, which is labelled once, as
+        // "Colour". The names are here because an axis is entitled to
+        // one, not because anything currently draws them.
         AxisKind::Hue => "Hue",
+        AxisKind::Saturation => "Saturation",
         AxisKind::Temperature => "Target",
         AxisKind::Position => "Position",
     }
@@ -140,11 +150,14 @@ fn axis_label(kind: AxisKind) -> &'static str {
 fn control_block<'a>(
     entity_id: &str,
     view: &ControlView,
-    font: f32,
+    size: WidgetSize,
     p: Palette,
 ) -> Element<'a, Message> {
+    let font = size.detail_font();
+
     match &view.control {
         Control::Value(axis) => control_row(entity_id, axis, view.value(0), font, p),
+        Control::Color { .. } => colour_block(entity_id, view.value(0), view.value(1), size, p),
     }
 }
 
@@ -198,29 +211,18 @@ fn control_row<'a>(
 ) -> Element<'a, Message> {
     let absent = value.is_none();
     let opacity = if absent { ABSENT_OPACITY } else { 1.0 };
-    let label_color = fade(p.text_dim, opacity);
-    let value_color = fade(p.text_secondary, opacity);
 
     // The slider still needs a position in range to lay itself out. It
     // is the minimum, but with the knob hidden nothing renders there.
     let position = value.unwrap_or(control.min);
 
-    let label = text(axis_label(control.kind))
-        .size(font)
-        .style(move |_: &iced::Theme| iced::widget::text::Style {
-            color: Some(label_color),
-        });
-
-    // A readout is a statement about the device, so an axis the device
-    // is not driving has nothing to state.
-    let value_text = text(match value {
-        Some(value) => readout(control, value),
-        None => "-".to_owned(),
-    })
-    .size(font)
-    .style(move |_: &iced::Theme| iced::widget::text::Style {
-        color: Some(value_color),
-    });
+    let header = control_header(
+        axis_label(control.kind),
+        value.map(|value| readout(control, value)),
+        font,
+        opacity,
+        p,
+    );
 
     let axis = control.kind;
     let bar = iced::widget::slider(control.min..=control.max, position, {
@@ -255,9 +257,102 @@ fn control_row<'a>(
         style
     });
 
+    column![header, bar].spacing(4).width(Length::Fill).into()
+}
+
+/// The label-and-readout line every control is headed by.
+///
+/// Shared so a colour surface and a slider line their labels up, and so
+/// "the value, or a dash when there is none" is stated once. The dash is
+/// what an absent axis reads as: a readout is a statement about the
+/// device, and an axis the device is not driving has nothing to state.
+fn control_header<'a>(
+    label: &'static str,
+    value: Option<String>,
+    font: f32,
+    opacity: f32,
+    p: Palette,
+) -> Element<'a, Message> {
+    let label_color = fade(p.text_dim, opacity);
+    let value_color = fade(p.text_secondary, opacity);
+
+    let label = text(label)
+        .size(font)
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(label_color),
+        });
+
+    let value = text(value.unwrap_or_else(|| "-".to_owned()))
+        .size(font)
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(value_color),
+        });
+
+    row![label, space().width(Length::Fill), value]
+        .align_y(Alignment::Center)
+        .into()
+}
+
+/// The colour surface inside an expanded widget: a label with its
+/// readout, and the two-dimensional field beneath (#97).
+///
+/// The readout names both axes, in the units they are in - degrees
+/// around the wheel and percent of colour - because a colour is one
+/// value with two components rather than two values shown together.
+///
+/// `hue` and `saturation` are what [`ControlView::value`] resolved, and
+/// `None` in either means Home Assistant is reporting no colour: the
+/// light is off, or sitting in a white mode. The block then renders as
+/// *absent* - dimmed, with no marker at all - for the reason a slider
+/// then renders without a knob. A marker parked in the top-left corner
+/// over a "0°, 0%" readout would be claiming the bulb is showing white,
+/// which is a claim about the house and a false one (#94).
+///
+/// Nothing about its behaviour changes. Dragging it sends the same
+/// service call, and for a light that is off `light.turn_on` carrying
+/// `hs_color` is also what turns the light on.
+fn colour_block<'a>(
+    entity_id: &str,
+    hue: Option<f32>,
+    saturation: Option<f32>,
+    size: WidgetSize,
+    p: Palette,
+) -> Element<'a, Message> {
+    let colour = hue.zip(saturation);
+    let opacity = if colour.is_none() {
+        ABSENT_OPACITY
+    } else {
+        1.0
+    };
+
+    let readout = colour.map(|(hue, saturation)| format!("{hue:.0}°, {saturation:.0}%"));
+
+    let field = colour_field::colour_field(
+        colour,
+        size.colour_field_size().height,
+        colour_field::Style {
+            // Flat in this ticket. The spectrum is #06's, and this is
+            // what shows through underneath it.
+            fill: fade(p.card_2, opacity),
+            marker: fade(iced::Color::WHITE, opacity),
+            marker_shadow: fade(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5), opacity),
+        },
+        {
+            let entity_id = entity_id.to_owned();
+            move |hue: f32, saturation: f32| Message::ColorChanged {
+                entity_id: entity_id.clone(),
+                hue,
+                saturation,
+            }
+        },
+        Message::ColorReleased {
+            entity_id: entity_id.to_owned(),
+        },
+    );
+
     column![
-        row![label, space().width(Length::Fill), value_text].align_y(Alignment::Center),
-        bar,
+        control_header("Colour", readout, size.detail_font(), opacity, p),
+        field,
     ]
     .spacing(4)
     .width(Length::Fill)
@@ -567,7 +662,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
                 inner_column = inner_column.push(control_block(
                     &state.entity_id,
                     view,
-                    widget_settings.widget_size.detail_font(),
+                    widget_settings.widget_size,
                     p,
                 ));
             }

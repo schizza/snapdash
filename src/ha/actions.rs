@@ -181,13 +181,15 @@ pub enum AxisKind {
     ColorTemp,
     /// Position on the colour wheel, in degrees.
     Hue,
+    /// How much colour, as a percentage, with 0 being white.
+    Saturation,
     Temperature,
     Position,
 }
 
 impl AxisKind {
     /// How far an echo may sit from the value we sent and still count as
-    /// confirmation of it.
+    /// confirmation of it, for the axes that are confirmed on their own.
     ///
     /// Not one constant, because the round trip through Home Assistant
     /// is lossy by different amounts per axis. Brightness, position and
@@ -201,39 +203,24 @@ impl AxisKind {
     /// 6369 K). 25 K clears that comfortably while staying at half the
     /// step, so it can never confirm a neighbouring stop.
     ///
-    /// Hue is lossy for the same reason and by much less. A light whose
-    /// native mode is RGB stores the colour as three bytes, so the hue
-    /// that comes back is whatever those bytes convert to: the worst
-    /// case over the whole wheel at full saturation is 0.235 degrees
-    /// (hue 132 is stored as `rgb(0, 255, 50)` and read back as
-    /// 131.765). 0.5 clears that by better than double while staying at
-    /// half the 1-degree step, so a neighbouring degree can never
-    /// confirm.
-    ///
-    /// A light whose native mode is `xy` is a different matter. Colour
-    /// reaches it through a gamut conversion rather than a quantisation,
-    /// and roughly a third of the wheel comes back more than 0.5 degrees
-    /// out, up to 2.7 at hue 242. Widening to cover that would take the
-    /// slack past the 1-degree step and let a neighbouring colour confirm
-    /// a drag, so those lights reconcile on the settle timeout instead of
-    /// on the echo. The way out is the one variable saturation forces
-    /// too: compare in RGB rather than in degrees.
-    ///
-    /// That bound holds because saturation is currently pinned at 100,
-    /// where a byte of RGB is worth the least hue. As saturation falls
-    /// the same byte spans more of the wheel and the error grows to
-    /// roughly `20 / saturation` degrees, which no fixed number on this
-    /// axis can absorb without also confirming colours the user did not
-    /// pick. When saturation becomes settable, the comparison moves off
-    /// the axis and into the colour control, and is made in RGB.
-    pub fn echo_tolerance(self) -> f32 {
+    /// Hue and saturation have no answer here, and cannot have one. How
+    /// far a colour may have drifted is not a question either axis can
+    /// be asked alone: a light storing 8-bit RGB returns a hue roughly
+    /// `20 / saturation` degrees from the one it was given, which is
+    /// 0.24 degrees at full saturation and 19.9 at saturation 1, where
+    /// three bytes barely determine a hue at all. No fixed number on the
+    /// hue axis absorbs that without also confirming colours the user
+    /// did not pick. They are confirmed jointly instead, by
+    /// [`Control::Color`], and in RGB - see
+    /// `docs/adr/0004-controls-and-axes.md`.
+    fn echo_tolerance(self) -> Option<f32> {
         match self {
             // A setpoint round-trips through HA as a float and may come
             // back with a different representation than we sent, which
             // is all this needs to absorb.
-            Self::Brightness | Self::Temperature | Self::Position => 0.01,
-            Self::ColorTemp => 25.0,
-            Self::Hue => 0.5,
+            Self::Brightness | Self::Temperature | Self::Position => Some(0.01),
+            Self::ColorTemp => Some(25.0),
+            Self::Hue | Self::Saturation => None,
         }
     }
 }
@@ -254,57 +241,242 @@ pub struct Axis {
     pub current: Option<f32>,
 }
 
-/// The saturation every hue send carries.
-///
-/// Saturation is not yet something the user can set, and full is the only
-/// honest default while that is true. Sending the light's *current*
-/// saturation instead looks more conservative and is not: Home Assistant
-/// derives an `hs_color` for a light sitting in `color_temp` mode, and
-/// its saturation is the low one of a white, so a drag of the hue control
-/// would send a colour the eye cannot tell from the white already showing
-/// and the control would look broken.
-const HUE_SATURATION: u8 = 100;
-
 impl Axis {
-    /// Build the action that sets this dimension to `value`.
-    pub fn action(&self, value: f32) -> ActionKind {
-        let clamped = value.clamp(self.min, self.max);
-        match self.kind {
-            AxisKind::Brightness => ActionKind::SetBrightness(clamped as u8),
-            AxisKind::ColorTemp => ActionKind::SetColorTemp(clamped as u32),
-            AxisKind::Hue => ActionKind::SetHs {
-                hue: clamped as u16,
-                saturation: HUE_SATURATION,
-            },
-            AxisKind::Temperature => ActionKind::SetTemperature(clamped),
-            AxisKind::Position => ActionKind::SetPosition(clamped as u8),
-        }
+    /// `value` brought inside the range Home Assistant reported for this
+    /// dimension.
+    fn clamped(&self, value: f32) -> f32 {
+        value.clamp(self.min, self.max)
     }
 }
 
 /// One thing the user grabs in an expanded widget.
 ///
 /// An [`Axis`] is a numeric dimension of the entity; a `Control` is the
-/// affordance that drives one. They have been 1:1 so far, which is why
-/// they were the same type, but they are not the same concept: a colour
-/// surface is one control setting two axes with one gesture and one
-/// service call.
+/// affordance that drives one or more of them, and it owns three things:
+/// how it draws, what it puts on the wire ([`Control::action`]), and how
+/// it recognises its own echo ([`Control::reconciles`]).
+///
+/// They were 1:1 until the colour surface arrived, which is why they were
+/// the same type, but they are not the same concept: a colour surface is
+/// one control setting two axes with one gesture and one service call.
 ///
 /// The enum exists so that grouping is a fact of the type rather than a
 /// convention. A flat list with a "these belong together" marker would
 /// permit a hue with no saturation beside it, and nothing would catch
-/// it.
+/// it. Recorded in `docs/adr/0004-controls-and-axes.md`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Control {
     /// A single axis, dragged on a slider of its own.
     Value(Axis),
+    /// Hue and saturation, dragged as one point on a two-dimensional
+    /// field.
+    Color { hue: Axis, saturation: Axis },
+}
+
+/// How far two colours may differ, per eight-bit channel, and still
+/// count as the same colour.
+///
+/// One level, which is the least a comparison can allow and still be a
+/// tolerance at all. It has to be at least that, because Home Assistant
+/// changed `color_hsv_to_RGB` from truncating to rounding between the
+/// 2024.7 and 2025.1 releases: the two differ by exactly one level, and
+/// Snapdash cannot know which of them the house is running. One level is
+/// also enough. Two whole degrees of hue are four levels apart at full
+/// saturation and two at half, so no neighbouring colour the user could
+/// have meant to pick instead can slip through - and below about
+/// saturation 20 neighbouring degrees are the *same* three bytes, which
+/// is the point: they are the same colour.
+const ECHO_CHANNEL_TOLERANCE: u8 = 1;
+
+/// A colour as the three eight-bit channels a light actually stores.
+type Rgb8 = [u8; 3];
+
+/// Hue and saturation as the eight-bit colour Home Assistant makes of
+/// them.
+///
+/// A transcription of `color_hs_to_RGB` from `homeassistant/util/color.py`,
+/// which is `color_hsv_to_RGB(hue, saturation, 100)`, which is
+/// `colorsys.hsv_to_rgb(hue / 360, saturation / 100, 1)` scaled to eight
+/// bits. It is deliberately Home Assistant's arithmetic and not a tidier
+/// equivalent, because the whole purpose is to land on the same three
+/// bytes the bulb was given.
+///
+/// In `f64` rather than `f32` for the same reason: Python computes this
+/// in doubles, and a component that lands within float noise of a
+/// half-level would otherwise round the other way and shift a channel.
+///
+/// Note that this is *not* [`crate::ui::colour_texture`]'s pixel
+/// function, even though both turn an HSV triple into bytes. That one
+/// paints what the user sees and rounds so the field does not darken
+/// towards its saturated edge; this one has to agree with a third party
+/// to the level. Making them one function would mean one of the two jobs
+/// silently getting the other's answer.
+fn hs_to_rgb8(hue: f32, saturation: f32) -> Rgb8 {
+    let hue = f64::from(hue) / 360.0;
+    let saturation = f64::from(saturation) / 100.0;
+
+    // `colorsys.hsv_to_rgb` takes this branch verbatim, and it matters
+    // for more than speed: with S = 0 the sector arithmetic below is
+    // undefined-ish at the seam, and white is white at every hue.
+    let (red, green, blue) = if saturation == 0.0 {
+        (1.0, 1.0, 1.0)
+    } else {
+        let sector = hue * 6.0;
+        // Python's `int()`, which truncates towards zero rather than
+        // rounding. `rem_euclid` then folds hue 360 back onto the red
+        // the wheel starts at, exactly as `i % 6` does there.
+        let index = sector as i64;
+        let offset = sector - index as f64;
+
+        // The value axis is pinned to 1, so `v` drops out of all three
+        // of Python's `p`, `q` and `t`.
+        let p = 1.0 - saturation;
+        let q = 1.0 - saturation * offset;
+        let t = 1.0 - saturation * (1.0 - offset);
+
+        match index.rem_euclid(6) {
+            0 => (1.0, t, p),
+            1 => (q, 1.0, p),
+            2 => (p, 1.0, t),
+            3 => (p, q, 1.0),
+            4 => (t, p, 1.0),
+            _ => (1.0, p, q),
+        }
+    };
+
+    [level(red), level(green), level(blue)]
+}
+
+/// A 0..=1 colour component as the eight-bit level Python's `round`
+/// makes of it.
+///
+/// Ties go to even, which is what `round` does in Python 3 and what
+/// `f64::round` does not: `round(178.5)` is 178 there and 179 here.
+/// Half a level is not visible, but agreeing to the level is the entire
+/// job of this conversion, so it uses the same rule.
+fn level(component: f64) -> u8 {
+    (component * 255.0).round_ties_even() as u8
+}
+
+fn same_colour(sent: Rgb8, echoed: Rgb8) -> bool {
+    sent.iter()
+        .zip(echoed)
+        .all(|(sent, echoed)| sent.abs_diff(echoed) <= ECHO_CHANNEL_TOLERANCE)
 }
 
 impl Control {
     /// Every axis this control drives, in the order it presents them.
     pub fn axes(&self) -> impl Iterator<Item = &Axis> {
+        let (first, second) = match self {
+            Self::Value(axis) => (axis, None),
+            Self::Color { hue, saturation } => (hue, Some(saturation)),
+        };
+
+        std::iter::once(first).chain(second)
+    }
+
+    /// The one service call that sets this control to the values a
+    /// gesture produced, or `None` when the gesture did not name
+    /// everything the call needs.
+    ///
+    /// One call per control and never one per axis. `hs_color` is a
+    /// single two-element parameter, so there is no way to name hue on
+    /// the wire without also naming saturation, and a colour sent as two
+    /// calls would be two colours - the first of them one the user never
+    /// pointed at.
+    ///
+    /// `value` answers the value of an axis this gesture moved, or `None`
+    /// for one it did not, which is how a brightness drag on a colour
+    /// bulb leaves the colour surface silent.
+    pub fn action(&self, value: impl Fn(AxisKind) -> Option<f32>) -> Option<ActionKind> {
         match self {
-            Self::Value(axis) => std::slice::from_ref(axis).iter(),
+            Self::Value(axis) => {
+                let clamped = axis.clamped(value(axis.kind)?);
+
+                Some(match axis.kind {
+                    AxisKind::Brightness => ActionKind::SetBrightness(clamped as u8),
+                    AxisKind::ColorTemp => ActionKind::SetColorTemp(clamped as u32),
+                    AxisKind::Temperature => ActionKind::SetTemperature(clamped),
+                    AxisKind::Position => ActionKind::SetPosition(clamped as u8),
+                    // Unreachable by construction: discovery only ever
+                    // puts these two inside `Control::Color`, which is
+                    // what makes an orphan hue unrepresentable. Silence
+                    // rather than a guess, because the guess would be a
+                    // saturation the user never chose.
+                    AxisKind::Hue | AxisKind::Saturation => return None,
+                })
+            }
+
+            Self::Color { hue, saturation } => Some(ActionKind::SetHs {
+                hue: hue.clamped(value(AxisKind::Hue)?) as u16,
+                saturation: saturation.clamped(value(AxisKind::Saturation)?) as u8,
+            }),
+        }
+    }
+
+    /// Whether this echo confirms what was put on the wire.
+    ///
+    /// `self` is the control as Home Assistant has just reported it, so
+    /// each [`Axis::current`] is the echoed value. `sent` answers the
+    /// last value sent for an axis, or `None` when that axis has nothing
+    /// outstanding.
+    ///
+    /// The judgement is the control's whole gesture at once and never one
+    /// axis at a time, which is what a colour needs: half a confirmed
+    /// colour is not a thing, and the caller releases every axis this
+    /// control drives or none of them.
+    ///
+    /// A control with nothing outstanding is vacuously confirmed - there
+    /// is nothing for the echo to disagree with, and nothing to release.
+    pub fn reconciles(&self, sent: impl Fn(AxisKind) -> Option<f32>) -> bool {
+        match self {
+            Self::Value(axis) => {
+                let Some(sent) = sent(axis.kind) else {
+                    return true;
+                };
+
+                // An echo that carries no value for the axis is not
+                // confirmation of one, and an axis with no tolerance is
+                // not confirmable alone at all.
+                match (axis.current, axis.kind.echo_tolerance()) {
+                    (Some(echoed), Some(tolerance)) => (sent - echoed).abs() <= tolerance,
+                    _ => false,
+                }
+            }
+
+            Self::Color { hue, saturation } => {
+                let (hue_sent, saturation_sent) = (sent(AxisKind::Hue), sent(AxisKind::Saturation));
+
+                if hue_sent.is_none() && saturation_sent.is_none() {
+                    return true;
+                }
+
+                // Half a colour is not a thing in either direction. One
+                // component outstanding without the other cannot be
+                // judged, because eight-bit RGB needs both; and an echo
+                // carrying no colour at all - the light went off, or back
+                // into a white mode - confirms nothing.
+                let (Some(hue_sent), Some(saturation_sent)) = (hue_sent, saturation_sent) else {
+                    return false;
+                };
+                let (Some(hue_echoed), Some(saturation_echoed)) = (hue.current, saturation.current)
+                else {
+                    return false;
+                };
+
+                // Compared as colours rather than as the coordinates they
+                // happen to be written in. A light working in RGB or XY
+                // returns a hue and a saturation that are not the ones it
+                // was given, by an amount that grows without bound as
+                // saturation falls, but the three bytes it is showing are
+                // the three bytes it was told to show. Comparing those
+                // dissolves the low-saturation ambiguity, and takes hue
+                // wraparound with it: hue 0 and hue 360 are one colour.
+                same_colour(
+                    hs_to_rgb8(hue_sent, saturation_sent),
+                    hs_to_rgb8(hue_echoed, saturation_echoed),
+                )
+            }
         }
     }
 }
@@ -351,8 +523,8 @@ fn attr_f32(state: &EntityState, key: &str) -> Option<f32> {
     }
 }
 
-/// The hue Home Assistant is currently reporting, read out of the two
-/// elements of `hs_color`.
+/// One element of the `hs_color` Home Assistant is currently reporting:
+/// index 0 is the hue in degrees, index 1 the saturation in percent.
 ///
 /// Its own reader because `hs_color` is the one attribute Snapdash takes
 /// a value from that is not a scalar, and [`attr_f32`] would answer
@@ -363,9 +535,9 @@ fn attr_f32(state: &EntityState, key: &str) -> Option<f32> {
 /// kelvin value whenever the active mode is `color_temp`, so it is
 /// present for a bulb sitting in plain white. Discovery is keyed on
 /// `supported_color_modes` for that reason, never on this.
-fn attr_hue(state: &EntityState) -> Option<f32> {
+fn attr_hs(state: &EntityState, index: usize) -> Option<f32> {
     match state.attributes.get("hs_color")? {
-        Value::Array(hs) => hs.first()?.as_f64().map(|hue| hue as f32),
+        Value::Array(hs) => hs.get(index)?.as_f64().map(|value| value as f32),
         _ => None,
     }
 }
@@ -470,19 +642,30 @@ fn controls(state: &EntityState) -> Vec<Control> {
             }
 
             if light_has_colour(state) {
-                controls.push(Control::Value(Axis {
-                    kind: AxisKind::Hue,
-                    min: 0.0,
-                    // Capped at 359 rather than 360. The two ends of the
-                    // wheel are the same red, so a 360th stop would be a
-                    // second name for the value at 0 and every piece of
-                    // state that compares hues would have to know it.
-                    // Red still appears at both ends of the strip, as it
-                    // does in every hue field.
-                    max: 359.0,
-                    step: 1.0,
-                    current: attr_hue(state),
-                }));
+                controls.push(Control::Color {
+                    hue: Axis {
+                        kind: AxisKind::Hue,
+                        min: 0.0,
+                        // Capped at 359 rather than 360. The two ends of
+                        // the wheel are the same red, so a 360th stop
+                        // would be a second name for the value at 0 and
+                        // every piece of state that compares hues would
+                        // have to know it. Red still appears at both ends
+                        // of the field, as it does in every colour picker.
+                        max: 359.0,
+                        step: 1.0,
+                        current: attr_hs(state, 0),
+                    },
+                    saturation: Axis {
+                        kind: AxisKind::Saturation,
+                        min: 0.0,
+                        // The range `hs_color` itself uses, so nothing is
+                        // rescaled on the way out or on the way back.
+                        max: 100.0,
+                        step: 1.0,
+                        current: attr_hs(state, 1),
+                    },
+                });
             }
         }
 
@@ -789,11 +972,11 @@ mod tests {
     /// takes a colour, and an `hs`-only check would leave the most common
     /// of them - a plain RGB strip - with no colour control at all.
     #[test]
-    fn every_colour_mode_offers_a_hue_control() {
+    fn every_colour_mode_offers_a_colour_surface() {
         for mode in ["hs", "rgb", "rgbw", "rgbww", "xy"] {
             let s = state(
                 "light.strip",
-                json!({ "supported_color_modes": [mode], "hs_color": [120.0, 100.0] }),
+                json!({ "supported_color_modes": [mode], "hs_color": [120.0, 90.0] }),
             );
             let caps = Capabilities::from_state(&s);
 
@@ -801,6 +984,11 @@ mod tests {
                 .axis(AxisKind::Hue)
                 .unwrap_or_else(|| panic!("{mode} is a colour mode"));
             assert_eq!(hue.current, Some(120.0), "{mode}");
+            assert_eq!(
+                caps.axis(AxisKind::Saturation).and_then(|a| a.current),
+                Some(90.0),
+                "{mode}"
+            );
         }
     }
 
@@ -808,7 +996,7 @@ mod tests {
     /// on/off": `brightness`, `color_temp` and `white` are all modes a
     /// dimmable light reports, and none of them can show a colour.
     #[test]
-    fn a_light_with_no_colour_mode_offers_no_hue_control() {
+    fn a_light_with_no_colour_mode_offers_no_colour_surface() {
         for mode in ["onoff", "brightness", "color_temp", "white"] {
             let s = state(
                 "light.lamp",
@@ -823,10 +1011,17 @@ mod tests {
                 }),
             );
 
+            let caps = Capabilities::from_state(&s);
+
             assert!(
-                Capabilities::from_state(&s).axis(AxisKind::Hue).is_none(),
+                !caps
+                    .controls
+                    .iter()
+                    .any(|control| matches!(control, Control::Color { .. })),
                 "{mode} is not a colour mode"
             );
+            assert!(caps.axis(AxisKind::Hue).is_none(), "{mode}");
+            assert!(caps.axis(AxisKind::Saturation).is_none(), "{mode}");
         }
     }
 
@@ -847,18 +1042,63 @@ mod tests {
         assert_eq!(hue.current, None);
     }
 
-    /// Home Assistant reports the colour as one two-element array, so the
-    /// hue has to be read out of it. The saturation beside it is not read
-    /// at all yet: every send pins it at full.
+    /// Home Assistant reports the colour as one two-element array, so
+    /// both axes of the surface are read out of the same attribute.
     #[test]
-    fn hue_is_read_from_the_first_element_of_hs_color() {
+    fn the_colour_surface_reads_both_elements_of_hs_color() {
         let s = state(
             "light.strip",
-            json!({ "supported_color_modes": ["rgb"], "hs_color": [199.765, 100.0] }),
+            json!({ "supported_color_modes": ["rgb"], "hs_color": [199.765, 62.5] }),
         );
         let caps = Capabilities::from_state(&s);
 
         assert_eq!(caps.axis(AxisKind::Hue).unwrap().current, Some(199.765));
+        assert_eq!(caps.axis(AxisKind::Saturation).unwrap().current, Some(62.5));
+    }
+
+    /// Saturation is a full axis of its own, and one the user drives, so
+    /// it carries the range `hs_color` is stated in rather than a
+    /// rescaling of it.
+    #[test]
+    fn saturation_spans_zero_to_a_hundred_in_whole_steps() {
+        let s = state("light.strip", json!({ "supported_color_modes": ["rgb"] }));
+        let caps = Capabilities::from_state(&s);
+        let saturation = caps
+            .axis(AxisKind::Saturation)
+            .expect("an rgb light has a saturation");
+
+        assert_eq!(
+            (saturation.min, saturation.max, saturation.step),
+            (0.0, 100.0, 1.0)
+        );
+        // No `hs_color` at all, which is what an off light reports.
+        assert_eq!(saturation.current, None);
+    }
+
+    /// The two axes are one control, not two beside each other. Nothing
+    /// downstream has to be told they belong together, and nothing can
+    /// render the hue on a slider of its own.
+    #[test]
+    fn hue_and_saturation_arrive_as_one_control() {
+        let s = state(
+            "light.strip",
+            json!({ "supported_color_modes": ["rgb"], "hs_color": [199.765, 62.5] }),
+        );
+        let caps = Capabilities::from_state(&s);
+        let colour = caps
+            .controls
+            .iter()
+            .find(|control| matches!(control, Control::Color { .. }))
+            .expect("an rgb light has a colour surface");
+
+        // Brightness beside it, and nothing else: two controls, three
+        // axes.
+        assert_eq!(caps.controls.len(), 2);
+        assert_eq!(
+            colour.axes().map(|axis| axis.kind).collect::<Vec<_>>(),
+            vec![AxisKind::Hue, AxisKind::Saturation],
+            "hue across, saturation down, in the order the field shows them"
+        );
     }
 
     #[test]
@@ -931,41 +1171,249 @@ mod tests {
         assert!(Capabilities::from_state(&s).is_display_only());
     }
 
-    #[test]
-    fn an_axis_clamps_before_building_an_action() {
-        let c = Axis {
+    /// Every value in this module's tests reaches an action through the
+    /// same door a gesture does: a lookup by axis.
+    fn at(values: &[(AxisKind, f32)]) -> impl Fn(AxisKind) -> Option<f32> + use<'_> {
+        move |kind| {
+            values
+                .iter()
+                .find(|(k, _)| *k == kind)
+                .map(|(_, value)| *value)
+        }
+    }
+
+    fn brightness() -> Control {
+        Control::Value(Axis {
             kind: AxisKind::Brightness,
             min: 0.0,
             max: 255.0,
             step: 1.0,
             current: None,
-        };
-
-        assert_eq!(c.action(300.0), ActionKind::SetBrightness(255));
-        assert_eq!(c.action(-20.0), ActionKind::SetBrightness(0));
-        assert_eq!(c.action(128.0), ActionKind::SetBrightness(128));
+        })
     }
 
-    /// The clamp is what keeps the wheel single-valued: a hue past the
-    /// top lands on 359 rather than wrapping to 0, so nothing downstream
-    /// has to reason about which end of the strip a value came from.
+    /// A colour that went out and the colour that came back, each as
+    /// `(hue, saturation)`.
+    type RoundTrip = ((f32, f32), (f32, f32));
+
+    /// A colour surface built by hand, with whatever the echo reports.
+    fn colour(current: Option<(f32, f32)>) -> Control {
+        Control::Color {
+            hue: Axis {
+                kind: AxisKind::Hue,
+                min: 0.0,
+                max: 359.0,
+                step: 1.0,
+                current: current.map(|(hue, _)| hue),
+            },
+            saturation: Axis {
+                kind: AxisKind::Saturation,
+                min: 0.0,
+                max: 100.0,
+                step: 1.0,
+                current: current.map(|(_, saturation)| saturation),
+            },
+        }
+    }
+
     #[test]
-    fn a_hue_axis_sends_full_saturation_and_never_leaves_the_wheel() {
-        let hue = Axis {
-            kind: AxisKind::Hue,
-            min: 0.0,
-            max: 359.0,
-            step: 1.0,
-            current: None,
-        };
+    fn a_control_clamps_before_building_an_action() {
+        let control = brightness();
 
-        let hs = |hue: u16| ActionKind::SetHs {
-            hue,
-            saturation: 100,
-        };
+        assert_eq!(
+            control.action(at(&[(AxisKind::Brightness, 300.0)])),
+            Some(ActionKind::SetBrightness(255))
+        );
+        assert_eq!(
+            control.action(at(&[(AxisKind::Brightness, -20.0)])),
+            Some(ActionKind::SetBrightness(0))
+        );
+        assert_eq!(
+            control.action(at(&[(AxisKind::Brightness, 128.0)])),
+            Some(ActionKind::SetBrightness(128))
+        );
+    }
 
-        assert_eq!(hue.action(200.4), hs(200));
-        assert_eq!(hue.action(400.0), hs(359));
-        assert_eq!(hue.action(-1.0), hs(0));
+    /// A gesture that did not touch this control has nothing for it to
+    /// send. That is what keeps a brightness drag on a colour bulb from
+    /// also restating the colour.
+    #[test]
+    fn a_control_the_gesture_did_not_move_sends_nothing() {
+        assert_eq!(brightness().action(at(&[(AxisKind::Hue, 200.0)])), None);
+        assert_eq!(
+            colour(None).action(at(&[(AxisKind::Brightness, 128.0)])),
+            None
+        );
+    }
+
+    /// Both components in one call, and the clamp is what keeps the
+    /// wheel single-valued: a hue past the top lands on 359 rather than
+    /// wrapping to 0, so nothing downstream has to reason about which
+    /// end of the field a value came from.
+    #[test]
+    fn a_colour_surface_sends_both_components_and_never_leaves_the_wheel() {
+        let field = colour(None);
+        let hs = |hue: u16, saturation: u8| Some(ActionKind::SetHs { hue, saturation });
+
+        assert_eq!(
+            field.action(at(&[(AxisKind::Hue, 212.0), (AxisKind::Saturation, 85.0)])),
+            hs(212, 85)
+        );
+        assert_eq!(
+            field.action(at(&[(AxisKind::Hue, 400.0), (AxisKind::Saturation, 140.0)])),
+            hs(359, 100)
+        );
+        assert_eq!(
+            field.action(at(&[(AxisKind::Hue, -1.0), (AxisKind::Saturation, -1.0)])),
+            hs(0, 0)
+        );
+    }
+
+    /// Half a colour cannot go on the wire, because `hs_color` is one
+    /// parameter carrying two numbers: there is no way to name the hue
+    /// without also naming a saturation, and inventing one would send a
+    /// colour the user did not pick.
+    #[test]
+    fn a_colour_surface_sends_nothing_for_half_a_gesture() {
+        let field = colour(Some((40.0, 100.0)));
+
+        assert_eq!(field.action(at(&[(AxisKind::Hue, 212.0)])), None);
+        assert_eq!(field.action(at(&[(AxisKind::Saturation, 85.0)])), None);
+    }
+
+    /// Every `(sent, echoed)` pair below was produced by running Home
+    /// Assistant's own `homeassistant.util.color`, not by any arithmetic
+    /// of Snapdash's:
+    ///
+    /// ```text
+    /// rgb = color_hs_to_RGB(hue, saturation)
+    /// echoed = color_RGB_to_hs(*rgb)
+    /// ```
+    ///
+    /// That matters more than it looks. An expected value recomputed the
+    /// way the code computes it can never disagree with the code, so a
+    /// table generated by this module's `hs_to_rgb8` would assert
+    /// nothing at all.
+    ///
+    /// Both eras are here because both are running in people's houses.
+    /// Home Assistant changed `color_hsv_to_RGB` from truncating to
+    /// rounding between 2025.1 and the 2024.7 before it, which moves
+    /// whole rows: hue 59 at saturation 1 comes back as 60 from one and
+    /// as 40 from the other. Every row of both must confirm.
+    const GOLDEN_ECHOES: &[RoundTrip] = &[
+        // Home Assistant 2025.1 and later, which rounds.
+        ((0.0, 100.0), (0.0, 100.0)),       // rgb(255, 0, 0)
+        ((59.0, 1.0), (60.0, 1.176)),       // rgb(255, 255, 252)
+        ((0.0, 80.0), (0.0, 80.0)),         // rgb(255, 51, 51)
+        ((132.0, 100.0), (132.0, 100.0)),   // rgb(0, 255, 51)
+        ((200.0, 100.0), (200.0, 100.0)),   // rgb(0, 170, 255)
+        ((212.0, 85.0), (212.074, 85.098)), // rgb(38, 139, 255)
+        ((240.0, 3.0), (240.0, 3.137)),     // rgb(247, 247, 255)
+        ((300.0, 50.0), (300.0, 49.804)),   // rgb(255, 128, 255)
+        ((359.0, 100.0), (359.059, 100.0)), // rgb(255, 0, 4)
+        ((359.0, 1.0), (0.0, 1.176)),       // rgb(255, 252, 252)
+        ((45.0, 2.0), (48.0, 1.961)),       // rgb(255, 254, 250)
+        ((180.0, 7.0), (180.0, 7.059)),     // rgb(237, 255, 255)
+        ((96.0, 33.0), (95.714, 32.941)),   // rgb(205, 255, 171)
+        // Home Assistant 2024.7 and earlier, which truncates.
+        ((59.0, 1.0), (40.0, 1.176)),       // rgb(255, 254, 252)
+        ((0.0, 80.0), (0.0, 80.392)),       // rgb(255, 50, 50)
+        ((132.0, 100.0), (131.765, 100.0)), // rgb(0, 255, 50)
+        ((200.0, 100.0), (200.235, 100.0)), // rgb(0, 169, 255)
+        ((300.0, 50.0), (300.0, 50.196)),   // rgb(255, 127, 255)
+        ((45.0, 2.0), (40.0, 2.353)),       // rgb(255, 253, 249)
+        ((96.0, 33.0), (96.0, 33.333)),     // rgb(204, 255, 170)
+    ];
+
+    /// The tolerance, stated as the round trips it has to survive.
+    ///
+    /// Read the low-saturation rows first: hue 59 at saturation 1 comes
+    /// back as 40 or as 60 depending on the release, nineteen degrees
+    /// out and past any tolerance a hue axis could carry without also
+    /// confirming a colour the user did not pick. As three bytes they
+    /// are the same colour, which is the whole argument for comparing
+    /// there.
+    #[test]
+    fn an_echo_from_an_rgb_light_confirms_at_any_saturation() {
+        for &((hue_sent, saturation_sent), (hue_echoed, saturation_echoed)) in GOLDEN_ECHOES {
+            let control = colour(Some((hue_echoed, saturation_echoed)));
+
+            assert!(
+                control.reconciles(at(&[
+                    (AxisKind::Hue, hue_sent),
+                    (AxisKind::Saturation, saturation_sent),
+                ])),
+                "({hue_sent}, {saturation_sent}) came back as \
+                 ({hue_echoed}, {saturation_echoed}) and must confirm"
+            );
+        }
+    }
+
+    /// And no wider than that. Each pair here is two colours a person
+    /// would call different, so the light answering with the second is
+    /// the light not having done what it was told - the case the settle
+    /// window exists for, and one the widget must not paper over by
+    /// declaring itself confirmed.
+    ///
+    /// The eight-bit distances are the reason each one is here: ten
+    /// degrees of hue at full saturation is 42 levels, one degree is 4,
+    /// one point of saturation at full hue is 3, and three points of
+    /// saturation near white is 7.
+    #[test]
+    fn a_genuinely_different_colour_does_not_confirm() {
+        const DIFFERENT: &[RoundTrip] = &[
+            ((200.0, 100.0), (210.0, 100.0)),
+            ((120.0, 100.0), (121.0, 100.0)),
+            ((200.0, 100.0), (200.0, 99.0)),
+            ((0.0, 50.0), (180.0, 50.0)),
+            ((0.0, 100.0), (359.0, 100.0)),
+            ((59.0, 1.0), (59.0, 4.0)),
+            ((200.0, 100.0), (200.0, 90.0)),
+        ];
+
+        for &((hue_sent, saturation_sent), (hue_echoed, saturation_echoed)) in DIFFERENT {
+            let control = colour(Some((hue_echoed, saturation_echoed)));
+
+            assert!(
+                !control.reconciles(at(&[
+                    (AxisKind::Hue, hue_sent),
+                    (AxisKind::Saturation, saturation_sent),
+                ])),
+                "({hue_sent}, {saturation_sent}) must not be confirmed by \
+                 ({hue_echoed}, {saturation_echoed})"
+            );
+        }
+    }
+
+    /// A light that went off, or back into a white mode, reports no
+    /// colour at all. That is not confirmation of the one it was given,
+    /// and treating it as one would hand the surface back to Home
+    /// Assistant while the house is showing something else entirely.
+    #[test]
+    fn an_echo_carrying_no_colour_confirms_nothing() {
+        assert!(
+            !colour(None).reconciles(at(&[(AxisKind::Hue, 212.0), (AxisKind::Saturation, 85.0),]))
+        );
+    }
+
+    /// Nothing outstanding, nothing to confirm. The caller uses this to
+    /// decide what to release, so a control with no pending axis has to
+    /// answer yes and release nothing rather than answer no and hold an
+    /// entity that is not waiting on anything.
+    #[test]
+    fn a_control_with_nothing_in_flight_is_vacuously_confirmed() {
+        assert!(colour(Some((40.0, 100.0))).reconciles(at(&[])));
+        assert!(brightness().reconciles(at(&[])));
+    }
+
+    /// Half a colour cannot be judged either. Eight-bit RGB needs both
+    /// components, so a control holding one of them and not the other
+    /// keeps waiting rather than guessing.
+    #[test]
+    fn half_a_colour_in_flight_is_not_confirmed() {
+        let control = colour(Some((212.074, 85.098)));
+
+        assert!(!control.reconciles(at(&[(AxisKind::Hue, 212.0)])));
+        assert!(!control.reconciles(at(&[(AxisKind::Saturation, 85.0)])));
     }
 }

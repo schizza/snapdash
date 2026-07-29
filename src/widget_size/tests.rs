@@ -2,14 +2,81 @@ use crate::ha::{Axis, AxisKind, Control};
 use crate::helpers::humanize_magnitude;
 use crate::widget_size::WidgetSize;
 
-fn slider() -> Control {
-    Control::Value(Axis {
-        kind: AxisKind::Brightness,
+fn axis(kind: AxisKind, max: f32) -> Axis {
+    Axis {
+        kind,
         min: 0.0,
-        max: 255.0,
+        max,
         step: 1.0,
         current: None,
-    })
+    }
+}
+
+fn slider() -> Control {
+    Control::Value(axis(AxisKind::Brightness, 255.0))
+}
+
+fn colour() -> Control {
+    Control::Color {
+        hue: axis(AxisKind::Hue, 359.0),
+        saturation: axis(AxisKind::Saturation, 100.0),
+    }
+}
+
+/// The three the design calls for, stated as literals rather than
+/// recomputed from the presets: they are the numbers the field was drawn
+/// to, and deriving them here would make this test agree with whatever
+/// the arithmetic happens to say.
+#[test]
+fn the_colour_field_is_a_slider_track_wide_and_half_as_tall() {
+    assert_eq!(
+        WidgetSize::Small.colour_field_size(),
+        iced::Size::new(132.0, 66.0)
+    );
+    assert_eq!(
+        WidgetSize::Normal.colour_field_size(),
+        iced::Size::new(172.0, 86.0)
+    );
+    assert_eq!(
+        WidgetSize::Large.colour_field_size(),
+        iced::Size::new(212.0, 106.0)
+    );
+}
+
+/// A colour surface is a field, not a slider, so the window grows by
+/// more for one than for the other. That is the whole reason the
+/// controls area is a sum over per-control heights rather than a row
+/// height times a count.
+#[test]
+fn a_colour_surface_costs_more_height_than_a_slider() {
+    for &size in WidgetSize::ALL {
+        let field = size.colour_field_size().height;
+
+        assert!(
+            size.control_height(&colour()) > size.control_height(&slider()),
+            "{size}"
+        );
+        // The difference is the field standing where the rail would, and
+        // nothing else: the label line and the separating gap are shared.
+        assert_eq!(
+            size.control_height(&colour()) - size.control_height(&slider()),
+            field - 16.0,
+            "{size}"
+        );
+    }
+}
+
+/// The mixture a colour bulb actually offers: a brightness slider, a
+/// white slider and the colour surface, each with its own gap.
+#[test]
+fn a_colour_bulbs_controls_sum_their_own_heights() {
+    for &size in WidgetSize::ALL {
+        assert_eq!(
+            size.controls_height(&[slider(), slider(), colour()]),
+            size.control_height(&slider()) * 2.0 + size.control_height(&colour()),
+            "{size}"
+        );
+    }
 }
 
 /// An entity with no control has nothing to reveal, so there is nothing

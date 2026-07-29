@@ -1,4 +1,5 @@
 pub mod chrome;
+pub mod colour_field;
 pub mod colour_texture;
 pub mod components;
 pub mod entity_window;

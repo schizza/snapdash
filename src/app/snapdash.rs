@@ -163,6 +163,22 @@ pub enum Message {
         entity_id: String,
         axis: ha::AxisKind,
     },
+    /// The colour surface was dragged to a new point (#97). Its own
+    /// message rather than a second component bolted onto
+    /// [`Self::ControlValueChanged`]: an optional saturation would then
+    /// ride along with every brightness and every setpoint, none of which
+    /// can ever have one, and every handler would have to say so.
+    ColorChanged {
+        entity_id: String,
+        hue: f32,
+        saturation: f32,
+    },
+    /// The colour surface was let go. It names no axis because a colour
+    /// is not dragged one axis at a time: both are flushed, and both go
+    /// out in the single `hs_color` they share.
+    ColorReleased {
+        entity_id: String,
+    },
     /// Ticks only while a pending value is outstanding, to retire the
     /// ones whose settle window ran out without a matching echo.
     PendingTick(iced::time::Instant),
@@ -405,17 +421,6 @@ impl Snapdash {
         }
     }
 
-    /// The value this echo carries for each axis the entity exposes, so
-    /// each can be compared against what we last sent for it. An axis HA
-    /// is not currently reporting comes back as `None`, which never
-    /// counts as confirmation.
-    fn echoed_values(state: &EntityState) -> Vec<(ha::AxisKind, Option<f32>)> {
-        ha::Capabilities::from_state(state)
-            .axes()
-            .map(|axis| (axis.kind, axis.current))
-            .collect()
-    }
-
     fn apply_entity_state(&mut self, new_state: EntityState) {
         let entity_id = new_state.entity_id.clone();
 
@@ -426,9 +431,15 @@ impl Snapdash {
         // updated, only the *display* is held back, so the moment the
         // pending value resolves or expires there is real state to fall
         // back to. See `docs/adr/0002-pending-values-and-settle-window.md`.
-        let ha_driven = self
-            .pending
-            .reconcile(&entity_id, &Self::echoed_values(&new_state));
+        //
+        // The echo goes in as the controls it built, not as loose values:
+        // each control carries what Home Assistant just reported for
+        // every axis it drives, which is exactly what it needs to
+        // recognise its own echo (`docs/adr/0004-controls-and-axes.md`).
+        let ha_driven = self.pending.reconcile(
+            &entity_id,
+            &ha::Capabilities::from_state(&new_state).controls,
+        );
 
         let (pulse, should_refresh_settings) = match self.ha.entities.get(&entity_id) {
             None => (true, true),
@@ -532,26 +543,42 @@ impl Snapdash {
             .collect()
     }
 
-    /// Turn a raw slider value into the right service call for that axis,
-    /// then dispatch it.
-    fn send_axis(
+    /// Put the values one gesture produced on the wire, as the service
+    /// calls the controls owning those axes build from them.
+    ///
+    /// Written over controls rather than over axes because the call is
+    /// the control's to build (`docs/adr/0004-controls-and-axes.md`). A
+    /// colour is one `light.turn_on` carrying both of its axes, and
+    /// dispatching per axis would make it two calls and therefore two
+    /// colours, the first of them one the user never pointed at.
+    ///
+    /// A control none of whose axes the gesture named stays silent, which
+    /// is what keeps a brightness drag on a colour bulb from also
+    /// restating the colour.
+    fn send_gesture(
         &self,
         entity_id: &str,
-        kind: ha::AxisKind,
-        value: f32,
+        values: &[(ha::AxisKind, f32)],
         connection: HaConnectionConfig,
     ) -> Task<Message> {
-        let Some(axis) = self
+        let actions: Vec<ha::ActionKind> = self
             .controls_for(entity_id)
             .iter()
-            .flat_map(ha::Control::axes)
-            .find(|a| a.kind == kind)
-            .cloned()
-        else {
-            return Task::none();
-        };
+            .filter_map(|control| {
+                control.action(|kind| {
+                    values
+                        .iter()
+                        .find(|(moved, _)| *moved == kind)
+                        .map(|(_, value)| *value)
+                })
+            })
+            .collect();
 
-        self.dispatch_action(entity_id.to_owned(), axis.action(value), connection)
+        Task::batch(
+            actions.into_iter().map(|action| {
+                self.dispatch_action(entity_id.to_owned(), action, connection.clone())
+            }),
+        )
     }
 
     /// Put an expanded widget back at its preset size and, when it had
@@ -1757,7 +1784,7 @@ impl Snapdash {
                     return Task::none();
                 }
 
-                self.send_axis(&entity_id, axis, value, connection)
+                self.send_gesture(&entity_id, &[(axis, value)], connection)
             }
 
             Message::ControlReleased { entity_id, axis } => {
@@ -1778,14 +1805,64 @@ impl Snapdash {
                     return Task::none();
                 };
 
-                // A control drives one axis today, so this batch is one
-                // call. It is written over whatever the release hands back
-                // rather than over the axis this message names, so that a
-                // control which grows a second axis cannot quietly leave
-                // that axis unsent.
-                Task::batch(flushed.into_iter().map(|(kind, value)| {
-                    self.send_axis(&entity_id, kind, value, connection.clone())
-                }))
+                // Written over whatever the release hands back rather than
+                // over the axis this message names, so that a control
+                // which grows a second axis cannot quietly leave that axis
+                // unsent.
+                self.send_gesture(&entity_id, &flushed, connection)
+            }
+
+            Message::ColorChanged {
+                entity_id,
+                hue,
+                saturation,
+            } => {
+                let Some(connection) = self.live_connection() else {
+                    self.set_status(
+                        format!("Cannot adjust {entity_id}: not connected to Home Assistant"),
+                        LogType::Warn,
+                    );
+                    return Task::none();
+                };
+
+                // One batch, so one throttle window for the whole gesture
+                // and a `last_sent` recorded on both axes when it goes
+                // out. Two `set` calls would spend the window on the hue
+                // and leave the saturation unable to ever recognise its
+                // echo (#96).
+                let moved = [
+                    (ha::AxisKind::Hue, hue),
+                    (ha::AxisKind::Saturation, saturation),
+                ];
+
+                if !self
+                    .pending
+                    .set(&entity_id, &moved, std::time::Instant::now())
+                {
+                    return Task::none();
+                }
+
+                self.send_gesture(&entity_id, &moved, connection)
+            }
+
+            Message::ColorReleased { entity_id } => {
+                let Some(flushed) = self.pending.release(
+                    &entity_id,
+                    &[ha::AxisKind::Hue, ha::AxisKind::Saturation],
+                    std::time::Instant::now(),
+                ) else {
+                    return Task::none();
+                };
+
+                let Some(connection) = self.live_connection() else {
+                    return Task::none();
+                };
+
+                // Both axes come back from one release and go out as one
+                // `SetHs`, not as two calls: `send_gesture` asks the
+                // control what to send, and a colour surface answers with
+                // a single `hs_color`.
+                self.send_gesture(&entity_id, &flushed, connection)
             }
 
             Message::PendingTick(now) => {

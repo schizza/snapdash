@@ -16,12 +16,17 @@
 //! authoritative forever and the widget would quietly lie about the
 //! state of the house.
 //!
-//! Echoes are compared to the last sent value with a tolerance, and
-//! that tolerance belongs to the **axis** rather than being one global
-//! constant. An axis whose value passes through a unit conversion on the
-//! way back does not return the number we sent, and how much it loses is
-//! a fact about that conversion, not about floats. See
-//! [`AxisKind::echo_tolerance`].
+//! How an echo is recognised is not this module's business at all. A
+//! value that passes through a unit conversion on the way back does not
+//! return the number we sent, and how much it loses is a fact about that
+//! conversion, not about floats - and for a colour it is not even a
+//! per-axis fact, because confirming a colour means comparing two
+//! colours rather than two pairs of coordinates. So an echo arrives here
+//! as the [`Control`]s Home Assistant just reported, and each control is
+//! asked whether it recognises its own ([`Control::reconciles`]). A
+//! control that says yes releases every axis it drives; one that says no
+//! releases none of them, because half a confirmed colour is not a
+//! thing. Recorded in `docs/adr/0004-controls-and-axes.md`.
 //!
 //! State is kept **per axis**, so brightness and colour temperature
 //! reconcile independently and neither overwrites the other. Throttling
@@ -44,7 +49,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::ha::AxisKind;
+use crate::ha::{AxisKind, Control};
 
 /// Minimum gap between service calls for one entity while it is being
 /// driven. Caps the send rate at ~5/sec, which is what keeps REST viable
@@ -82,17 +87,6 @@ impl Pending {
     fn update(&mut self, value: f32) {
         self.shown = value;
         self.settle_deadline = None;
-    }
-
-    /// `true` when this echo is the one we were waiting for, meaning the
-    /// axis can go back to being driven by HA.
-    ///
-    /// `kind` decides how much slack the comparison gets, because the
-    /// round trip through Home Assistant is lossy by different amounts
-    /// for different axes.
-    fn reconciles(&self, kind: AxisKind, echoed: f32) -> bool {
-        self.last_sent
-            .is_some_and(|sent| (sent - echoed).abs() <= kind.echo_tolerance())
     }
 
     /// `true` once the settle window has run out. Never true while the
@@ -215,22 +209,35 @@ impl PendingValues {
         Some(flushed)
     }
 
-    /// Feed in the values an entity's `state_changed` carries, one per
-    /// axis it reports.
+    /// Feed in an entity's `state_changed`, as the controls it reports.
+    ///
+    /// The echo arrives as controls rather than as loose axis/value pairs
+    /// because recognising an echo is the control's own job, and for a
+    /// colour it is a judgement over both of its axes at once. Each
+    /// control carries the echoed value of every axis it drives, in
+    /// [`Axis::current`], so it has everything it needs to answer.
+    ///
+    /// A control that recognises its echo releases every axis it drives;
+    /// one that does not releases none of them.
     ///
     /// Returns `true` when the entity is HA-driven again, meaning no axis
     /// of it is still waiting. `false` means the caller must keep
     /// rendering the pending values and ignore this echo, because
-    /// applying it would drag a slider back under the user's finger.
-    pub fn reconcile(&mut self, entity_id: &str, echoed: &[(AxisKind, Option<f32>)]) -> bool {
-        for (kind, value) in echoed {
-            let key = (entity_id.to_owned(), *kind);
-            let Some(pending) = self.axes.get(&key) else {
-                continue;
-            };
+    /// applying it would drag a control back under the user's finger.
+    ///
+    /// [`Axis::current`]: crate::ha::Axis::current
+    pub fn reconcile(&mut self, entity_id: &str, echoed: &[Control]) -> bool {
+        for control in echoed {
+            let axes = &self.axes;
+            let confirmed = control.reconciles(|kind| {
+                axes.get(&(entity_id.to_owned(), kind))
+                    .and_then(|pending| pending.last_sent)
+            });
 
-            if value.is_some_and(|value| pending.reconciles(*kind, value)) {
-                self.axes.remove(&key);
+            if confirmed {
+                for axis in control.axes() {
+                    self.axes.remove(&(entity_id.to_owned(), axis.kind));
+                }
             }
         }
 
@@ -290,12 +297,40 @@ impl PendingValues {
 mod tests {
     use super::*;
 
+    use crate::ha::Axis;
+
     const BRIGHTNESS: AxisKind = AxisKind::Brightness;
     const TEMP: AxisKind = AxisKind::ColorTemp;
     const HUE: AxisKind = AxisKind::Hue;
+    const SATURATION: AxisKind = AxisKind::Saturation;
 
     fn t0() -> Instant {
         Instant::now()
+    }
+
+    /// An axis carrying an echoed value. The range is filler: recognising
+    /// an echo consults the kind and the value and nothing else.
+    fn axis(kind: AxisKind, echoed: Option<f32>) -> Axis {
+        Axis {
+            kind,
+            min: 0.0,
+            max: 255.0,
+            step: 1.0,
+            current: echoed,
+        }
+    }
+
+    /// One scalar control as Home Assistant has just reported it.
+    fn echo(kind: AxisKind, value: Option<f32>) -> Control {
+        Control::Value(axis(kind, value))
+    }
+
+    /// A colour surface as Home Assistant has just reported it.
+    fn colour_echo(hue: Option<f32>, saturation: Option<f32>) -> Control {
+        Control::Color {
+            hue: axis(HUE, hue),
+            saturation: axis(SATURATION, saturation),
+        }
     }
 
     #[test]
@@ -379,7 +414,7 @@ mod tests {
         assert!(
             p.reconcile(
                 "light.a",
-                &[(BRIGHTNESS, Some(100.0)), (TEMP, Some(3000.0))]
+                &[echo(BRIGHTNESS, Some(100.0)), echo(TEMP, Some(3000.0))]
             ),
             "both axes must recognise the echo of what the batch sent"
         );
@@ -481,13 +516,13 @@ mod tests {
 
         p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
         assert!(
-            !p.reconcile("light.a", &[(BRIGHTNESS, Some(40.0))]),
+            !p.reconcile("light.a", &[echo(BRIGHTNESS, Some(40.0))]),
             "stale echo ignored"
         );
         assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0));
 
         assert!(
-            p.reconcile("light.a", &[(BRIGHTNESS, Some(100.0))]),
+            p.reconcile("light.a", &[echo(BRIGHTNESS, Some(100.0))]),
             "matching echo resolves"
         );
         assert_eq!(p.shown("light.a", BRIGHTNESS), None);
@@ -506,14 +541,14 @@ mod tests {
 
         let resolved = p.reconcile(
             "light.a",
-            &[(BRIGHTNESS, Some(100.0)), (TEMP, Some(2500.0))],
+            &[echo(BRIGHTNESS, Some(100.0)), echo(TEMP, Some(2500.0))],
         );
 
         assert!(!resolved, "colour temperature has not come back yet");
         assert_eq!(p.shown("light.a", BRIGHTNESS), None, "brightness resolved");
         assert_eq!(p.shown("light.a", TEMP), Some(3000.0), "still held");
 
-        assert!(p.reconcile("light.a", &[(TEMP, Some(3000.0))]));
+        assert!(p.reconcile("light.a", &[echo(TEMP, Some(3000.0))]));
         assert!(p.is_empty());
     }
 
@@ -530,7 +565,7 @@ mod tests {
         assert!(p.set("light.a", &[(BRIGHTNESS, 100.0)], now));
 
         // HA confirms almost immediately, so the axis is no longer waiting.
-        assert!(p.reconcile("light.a", &[(BRIGHTNESS, Some(100.0))]));
+        assert!(p.reconcile("light.a", &[echo(BRIGHTNESS, Some(100.0))]));
         assert!(p.is_empty());
 
         // The user has not let go, and the window has not elapsed.
@@ -573,7 +608,7 @@ mod tests {
         let mut p = PendingValues::default();
 
         p.set("climate.a", &[(AxisKind::Temperature, 21.5)], now);
-        assert!(p.reconcile("climate.a", &[(AxisKind::Temperature, Some(21.502))]));
+        assert!(p.reconcile("climate.a", &[echo(AxisKind::Temperature, Some(21.502))]));
     }
 
     /// A light that stores mireds internally round-trips kelvin through
@@ -588,7 +623,7 @@ mod tests {
         let mut p = PendingValues::default();
 
         p.set("light.a", &[(TEMP, 6350.0)], now);
-        assert!(p.reconcile("light.a", &[(TEMP, Some(6369.0))]));
+        assert!(p.reconcile("light.a", &[echo(TEMP, Some(6369.0))]));
     }
 
     /// The slack must stay under the 50 K step, or a stop could be
@@ -600,36 +635,71 @@ mod tests {
         let mut p = PendingValues::default();
 
         p.set("light.a", &[(TEMP, 3000.0)], now);
-        assert!(!p.reconcile("light.a", &[(TEMP, Some(3050.0))]));
+        assert!(!p.reconcile("light.a", &[echo(TEMP, Some(3050.0))]));
         assert_eq!(p.shown("light.a", TEMP), Some(3000.0));
     }
 
-    /// A light whose native mode is RGB stores the colour as three bytes,
-    /// so the hue that comes back is whatever those bytes convert to.
-    /// Hue 132 at full saturation is stored as `rgb(0, 255, 50)` and read
-    /// back as 131.765 - the worst case anywhere on the wheel. Without
-    /// slack for it the axis would run to the settle timeout on exactly
-    /// the lights the control exists for.
+    /// A colour is confirmed or held as one thing. The control says yes
+    /// and both of its axes go; it says no and both of them stay, because
+    /// a widget showing Home Assistant's hue over the user's saturation
+    /// would be showing a colour that exists nowhere.
+    ///
+    /// Hue 132 at full saturation is stored as `rgb(0, 255, 50)` by a
+    /// light of the older Home Assistant vintage and read back as
+    /// 131.765, which the control recognises because it compares the
+    /// bytes and not the degrees. What those bytes are, and why, is
+    /// [`Control::reconciles`]'s business and is tested there.
     #[test]
-    fn hue_reconciles_across_the_eight_bit_rgb_round_trip() {
+    fn a_colour_releases_both_of_its_axes_or_neither() {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", &[(HUE, 132.0)], now);
-        assert!(p.reconcile("light.a", &[(HUE, Some(131.765))]));
+        assert!(p.set("light.a", &[(HUE, 132.0), (SATURATION, 100.0)], now));
+        assert!(p.reconcile("light.a", &[colour_echo(Some(131.765), Some(100.0))]));
+        assert!(p.is_empty(), "both axes went together");
+
+        // Past the throttle window, so this one really goes out and both
+        // axes have something outstanding to be disagreed with.
+        assert!(p.set(
+            "light.a",
+            &[(HUE, 132.0), (SATURATION, 100.0)],
+            now + SEND_INTERVAL
+        ));
+        assert!(!p.reconcile("light.a", &[colour_echo(Some(200.0), Some(100.0))]));
+        assert_eq!(p.shown("light.a", HUE), Some(132.0));
+        assert_eq!(
+            p.shown("light.a", SATURATION),
+            Some(100.0),
+            "and neither did"
+        );
     }
 
-    /// And no more slack than that. The wheel is dragged in whole
-    /// degrees, so a tolerance that reached a neighbouring degree would
-    /// let the light confirm a colour the user did not pick.
+    /// A colour and a slider on the same light are still separate
+    /// interactions: one control confirming must not release the other's
+    /// axes, and must not hand the whole entity back while it waits.
     #[test]
-    fn hue_does_not_reconcile_against_a_neighbouring_degree() {
+    fn a_colour_confirming_leaves_a_slider_of_the_same_light_alone() {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", &[(HUE, 132.0)], now);
-        assert!(!p.reconcile("light.a", &[(HUE, Some(133.0))]));
-        assert_eq!(p.shown("light.a", HUE), Some(132.0));
+        p.set(
+            "light.a",
+            &[(BRIGHTNESS, 100.0), (HUE, 132.0), (SATURATION, 100.0)],
+            now,
+        );
+
+        let resolved = p.reconcile(
+            "light.a",
+            &[
+                echo(BRIGHTNESS, Some(40.0)),
+                colour_echo(Some(131.765), Some(100.0)),
+            ],
+        );
+
+        assert!(!resolved, "brightness has not come back yet");
+        assert_eq!(p.shown("light.a", HUE), None, "the colour resolved");
+        assert_eq!(p.shown("light.a", SATURATION), None);
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0), "still held");
     }
 
     /// The slack is colour temperature's, not everybody's. Brightness
@@ -640,14 +710,14 @@ mod tests {
         let mut p = PendingValues::default();
 
         p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
-        assert!(!p.reconcile("light.a", &[(BRIGHTNESS, Some(110.0))]));
+        assert!(!p.reconcile("light.a", &[echo(BRIGHTNESS, Some(110.0))]));
     }
 
     #[test]
     fn entities_without_a_pending_value_are_always_ha_driven() {
         let mut p = PendingValues::default();
         assert!(p.reconcile("sensor.temp", &[]));
-        assert!(p.reconcile("sensor.temp", &[(BRIGHTNESS, Some(12.0))]));
+        assert!(p.reconcile("sensor.temp", &[echo(BRIGHTNESS, Some(12.0))]));
     }
 
     #[test]
@@ -658,7 +728,7 @@ mod tests {
         p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
         // A state_changed with no readable value for the axis must not be
         // mistaken for confirmation.
-        assert!(!p.reconcile("light.a", &[(BRIGHTNESS, None)]));
+        assert!(!p.reconcile("light.a", &[echo(BRIGHTNESS, None)]));
         assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0));
     }
 
