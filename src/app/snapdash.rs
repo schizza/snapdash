@@ -1727,15 +1727,15 @@ impl Snapdash {
                     return Task::none();
                 };
 
-                // `set` returns None when the entity's throttle window
-                // swallows this move. The value is not lost: it stays in
-                // `shown`, and `ControlReleased` flushes the final one.
-                let Some(value) =
-                    self.pending
-                        .set(&entity_id, axis, value, std::time::Instant::now())
-                else {
+                // `set` says no when the entity's throttle window swallows
+                // this move. The value is not lost: it stays in `shown`,
+                // and `ControlReleased` flushes the final one.
+                if !self
+                    .pending
+                    .set(&entity_id, &[(axis, value)], std::time::Instant::now())
+                {
                     return Task::none();
-                };
+                }
 
                 self.send_axis(&entity_id, axis, value, connection)
             }
@@ -1747,9 +1747,9 @@ impl Snapdash {
                 // got one can never expire: the card would keep showing a
                 // number the house never confirmed, with nothing left to
                 // correct it. Only the service call needs a live socket.
-                let Some(value) = self
-                    .pending
-                    .release(&entity_id, axis, std::time::Instant::now())
+                let Some(flushed) =
+                    self.pending
+                        .release(&entity_id, &[axis], std::time::Instant::now())
                 else {
                     return Task::none();
                 };
@@ -1758,7 +1758,14 @@ impl Snapdash {
                     return Task::none();
                 };
 
-                self.send_axis(&entity_id, axis, value, connection)
+                // A control drives one axis today, so this batch is one
+                // call. It is written over whatever the release hands back
+                // rather than over the axis this message names, so that a
+                // control which grows a second axis cannot quietly leave
+                // that axis unsent.
+                Task::batch(flushed.into_iter().map(|(kind, value)| {
+                    self.send_axis(&entity_id, kind, value, connection.clone())
+                }))
             }
 
             Message::PendingTick(now) => {
