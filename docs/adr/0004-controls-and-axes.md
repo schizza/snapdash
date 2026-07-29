@@ -61,3 +61,9 @@ That is recorded in the module documentation of `src/app/pending.rs`, and the ba
 
 The throttle stays keyed per entity at 200 ms.
 Adding axes must not move the peak send rate, which is the invariant the arithmetic in `0003-service-calls-stay-on-rest.md` rests on.
+
+Asking a Control to recognise its echo means asking about three states per axis and not two.
+A per-entity throttle plus more than one Control per entity makes "held by the user with nothing yet on the wire" reachable: grabbing a second control inside the window the first one spent records what is shown and nothing sent.
+That axis has no last-sent value, exactly like an axis nobody is touching, and the two need opposite verdicts.
+An untouched axis is vacuously confirmed, because there is nothing for the echo to disagree with; a held one must never be, because releasing it would drop a gesture in progress and the value the user finally chose would never be sent at all.
+So `Control::reconciles` is asked for `Outstanding`, whose three variants make the distinction one the type carries rather than one every caller has to remember.

@@ -249,6 +249,29 @@ impl Axis {
     }
 }
 
+/// What one axis has outstanding at the moment an echo arrives.
+///
+/// The distinction that matters is between the first two: an axis nobody
+/// is touching and an axis being dragged whose sends the throttle has so
+/// far swallowed both have no value on the wire, and both would answer
+/// `None` to "what was last sent?". They need opposite verdicts. The
+/// first is vacuously confirmed, because there is nothing for the echo to
+/// disagree with. The second must never be, because releasing it would
+/// throw away a gesture the user is still making, and the value they
+/// finally chose would never be sent at all.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Outstanding {
+    /// No interaction. Nothing to confirm and nothing to release.
+    Nothing,
+    /// Held by the user, but every send so far fell inside the entity's
+    /// throttle window, so there is nothing for this echo to be an echo
+    /// of. Resolved by [`Control::action`] going out on the next window,
+    /// or by the flush on release.
+    Unsent,
+    /// This value is on the wire, awaiting confirmation.
+    Sent(f32),
+}
+
 /// One thing the user grabs in an expanded widget.
 ///
 /// An [`Axis`] is a numeric dimension of the entity; a `Control` is the
@@ -417,9 +440,10 @@ impl Control {
     /// Whether this echo confirms what was put on the wire.
     ///
     /// `self` is the control as Home Assistant has just reported it, so
-    /// each [`Axis::current`] is the echoed value. `sent` answers the
-    /// last value sent for an axis, or `None` when that axis has nothing
-    /// outstanding.
+    /// each [`Axis::current`] is the echoed value. `outstanding` answers
+    /// what an axis has in flight, which is three states and not two:
+    /// see [`Outstanding`] for why an axis with nothing on the wire is
+    /// not the same as an axis nobody is touching.
     ///
     /// The judgement is the control's whole gesture at once and never one
     /// axis at a time, which is what a colour needs: half a confirmed
@@ -428,11 +452,13 @@ impl Control {
     ///
     /// A control with nothing outstanding is vacuously confirmed - there
     /// is nothing for the echo to disagree with, and nothing to release.
-    pub fn reconciles(&self, sent: impl Fn(AxisKind) -> Option<f32>) -> bool {
+    pub fn reconciles(&self, outstanding: impl Fn(AxisKind) -> Outstanding) -> bool {
         match self {
             Self::Value(axis) => {
-                let Some(sent) = sent(axis.kind) else {
-                    return true;
+                let sent = match outstanding(axis.kind) {
+                    Outstanding::Nothing => return true,
+                    Outstanding::Unsent => return false,
+                    Outstanding::Sent(sent) => sent,
                 };
 
                 // An echo that carries no value for the axis is not
@@ -445,18 +471,25 @@ impl Control {
             }
 
             Self::Color { hue, saturation } => {
-                let (hue_sent, saturation_sent) = (sent(AxisKind::Hue), sent(AxisKind::Saturation));
+                let (hue_out, saturation_out) = (
+                    outstanding(AxisKind::Hue),
+                    outstanding(AxisKind::Saturation),
+                );
 
-                if hue_sent.is_none() && saturation_sent.is_none() {
+                if hue_out == Outstanding::Nothing && saturation_out == Outstanding::Nothing {
                     return true;
                 }
 
                 // Half a colour is not a thing in either direction. One
                 // component outstanding without the other cannot be
-                // judged, because eight-bit RGB needs both; and an echo
-                // carrying no colour at all - the light went off, or back
-                // into a white mode - confirms nothing.
-                let (Some(hue_sent), Some(saturation_sent)) = (hue_sent, saturation_sent) else {
+                // judged, because eight-bit RGB needs both; an axis whose
+                // sends the throttle swallowed has nothing to be judged
+                // against; and an echo carrying no colour at all - the
+                // light went off, or back into a white mode - confirms
+                // nothing.
+                let (Outstanding::Sent(hue_sent), Outstanding::Sent(saturation_sent)) =
+                    (hue_out, saturation_out)
+                else {
                     return false;
                 };
                 let (Some(hue_echoed), Some(saturation_echoed)) = (hue.current, saturation.current)
@@ -1173,12 +1206,36 @@ mod tests {
 
     /// Every value in this module's tests reaches an action through the
     /// same door a gesture does: a lookup by axis.
+    /// The values a gesture moved, for [`Control::action`].
     fn at(values: &[(AxisKind, f32)]) -> impl Fn(AxisKind) -> Option<f32> + use<'_> {
         move |kind| {
             values
                 .iter()
                 .find(|(k, _)| *k == kind)
                 .map(|(_, value)| *value)
+        }
+    }
+
+    /// The axes named here are on the wire; every other one has no
+    /// interaction at all. [`Outstanding::Unsent`] is the third state and
+    /// gets its own helper, because it is the one nothing else covers.
+    fn sent(values: &[(AxisKind, f32)]) -> impl Fn(AxisKind) -> Outstanding + use<'_> {
+        move |kind| {
+            values
+                .iter()
+                .find(|(k, _)| *k == kind)
+                .map_or(Outstanding::Nothing, |(_, value)| Outstanding::Sent(*value))
+        }
+    }
+
+    /// The axes named here are held with nothing yet on the wire.
+    fn unsent(kinds: &[AxisKind]) -> impl Fn(AxisKind) -> Outstanding + use<'_> {
+        move |kind| {
+            if kinds.contains(&kind) {
+                Outstanding::Unsent
+            } else {
+                Outstanding::Nothing
+            }
         }
     }
 
@@ -1339,7 +1396,7 @@ mod tests {
             let control = colour(Some((hue_echoed, saturation_echoed)));
 
             assert!(
-                control.reconciles(at(&[
+                control.reconciles(sent(&[
                     (AxisKind::Hue, hue_sent),
                     (AxisKind::Saturation, saturation_sent),
                 ])),
@@ -1375,7 +1432,7 @@ mod tests {
             let control = colour(Some((hue_echoed, saturation_echoed)));
 
             assert!(
-                !control.reconciles(at(&[
+                !control.reconciles(sent(&[
                     (AxisKind::Hue, hue_sent),
                     (AxisKind::Saturation, saturation_sent),
                 ])),
@@ -1391,9 +1448,10 @@ mod tests {
     /// Assistant while the house is showing something else entirely.
     #[test]
     fn an_echo_carrying_no_colour_confirms_nothing() {
-        assert!(
-            !colour(None).reconciles(at(&[(AxisKind::Hue, 212.0), (AxisKind::Saturation, 85.0),]))
-        );
+        assert!(!colour(None).reconciles(sent(&[
+            (AxisKind::Hue, 212.0),
+            (AxisKind::Saturation, 85.0),
+        ])));
     }
 
     /// Nothing outstanding, nothing to confirm. The caller uses this to
@@ -1402,8 +1460,8 @@ mod tests {
     /// entity that is not waiting on anything.
     #[test]
     fn a_control_with_nothing_in_flight_is_vacuously_confirmed() {
-        assert!(colour(Some((40.0, 100.0))).reconciles(at(&[])));
-        assert!(brightness().reconciles(at(&[])));
+        assert!(colour(Some((40.0, 100.0))).reconciles(sent(&[])));
+        assert!(brightness().reconciles(sent(&[])));
     }
 
     /// Half a colour cannot be judged either. Eight-bit RGB needs both
@@ -1413,7 +1471,30 @@ mod tests {
     fn half_a_colour_in_flight_is_not_confirmed() {
         let control = colour(Some((212.074, 85.098)));
 
-        assert!(!control.reconciles(at(&[(AxisKind::Hue, 212.0)])));
-        assert!(!control.reconciles(at(&[(AxisKind::Saturation, 85.0)])));
+        assert!(!control.reconciles(sent(&[(AxisKind::Hue, 212.0)])));
+        assert!(!control.reconciles(sent(&[(AxisKind::Saturation, 85.0)])));
+    }
+
+    /// And "held with nothing on the wire" is the opposite of "not held",
+    /// however alike the two look from here. An echo cannot confirm a
+    /// value that was never sent, whatever it happens to carry, so a
+    /// control in that state holds - which is what keeps a gesture the
+    /// entity's throttle has so far swallowed from being released by
+    /// some other control's echo.
+    #[test]
+    fn an_axis_held_with_nothing_on_the_wire_is_not_confirmed() {
+        assert!(!brightness().reconciles(unsent(&[AxisKind::Brightness])));
+
+        let control = colour(Some((212.074, 85.098)));
+        assert!(!control.reconciles(unsent(&[AxisKind::Hue, AxisKind::Saturation])));
+
+        // Including when the echo carries exactly the colour the user is
+        // pointing at: it is the echo of somebody else's call, and the
+        // next window is what will put this one on the wire.
+        assert!(!control.reconciles(|kind| match kind {
+            AxisKind::Hue => Outstanding::Unsent,
+            AxisKind::Saturation => Outstanding::Sent(85.0),
+            _ => Outstanding::Nothing,
+        }));
     }
 }

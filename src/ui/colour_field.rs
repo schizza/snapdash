@@ -479,6 +479,19 @@ where
             true
         };
 
+        // A touch is read through `cursor` rather than through the
+        // position the touch event carries, which looks like it would
+        // leave a touchscreen with no mouse unable to press the field at
+        // all. It does not: iced's winit shell sets its cursor position
+        // from `WindowEvent::Touch` as well as from `CursorMoved`, so on
+        // a finger event the cursor *is* the finger, and it is already
+        // in logical coordinates while `touch::Event` is not.
+        //
+        // What this does give up is multi-touch. The cursor is wherever
+        // the most recent finger went, so a second finger on the field
+        // moves the same gesture rather than starting its own. Snapdash
+        // has one colour surface open at a time and one marker to put
+        // somewhere, so there is nothing a second finger could mean.
         match event {
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | iced::Event::Touch(touch::Event::FingerPressed { .. }) => {

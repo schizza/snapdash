@@ -49,7 +49,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::ha::{AxisKind, Control};
+use crate::ha::{AxisKind, Control, Outstanding};
 
 /// Minimum gap between service calls for one entity while it is being
 /// driven. Caps the send rate at ~5/sec, which is what keeps REST viable
@@ -230,8 +230,19 @@ impl PendingValues {
         for control in echoed {
             let axes = &self.axes;
             let confirmed = control.reconciles(|kind| {
-                axes.get(&(entity_id.to_owned(), kind))
-                    .and_then(|pending| pending.last_sent)
+                // Three states, not two. An axis whose sends the entity's
+                // throttle has so far swallowed is holding a gesture in
+                // progress with nothing on the wire, and answering `None`
+                // for it - as for an axis with no interaction at all -
+                // would have this echo vacuously confirm it and release
+                // the value out from under the user's finger.
+                match axes.get(&(entity_id.to_owned(), kind)) {
+                    None => Outstanding::Nothing,
+                    Some(pending) => match pending.last_sent {
+                        None => Outstanding::Unsent,
+                        Some(sent) => Outstanding::Sent(sent),
+                    },
+                }
             });
 
             if confirmed {
@@ -700,6 +711,54 @@ mod tests {
         assert_eq!(p.shown("light.a", HUE), None, "the colour resolved");
         assert_eq!(p.shown("light.a", SATURATION), None);
         assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0), "still held");
+    }
+
+    /// A gesture that has not reached the wire yet is still a gesture.
+    ///
+    /// Grabbing a second control inside the entity's throttle window
+    /// creates axes with nothing sent, and the sibling's echo says
+    /// nothing about them. Reading that silence as confirmation would
+    /// release the axes mid-drag: the surface would jump back to Home
+    /// Assistant's colour under the user's finger, and the release would
+    /// then find nothing pending and never send what they chose.
+    #[test]
+    fn a_throttled_gesture_is_not_confirmed_by_a_siblings_echo() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        // Brightness goes out at once and spends the entity's window.
+        assert!(p.set("light.a", &[(BRIGHTNESS, 100.0)], now));
+
+        // Inside that window the user grabs the colour surface, so hue
+        // and saturation are held with nothing yet on the wire.
+        assert!(!p.set(
+            "light.a",
+            &[(HUE, 132.0), (SATURATION, 100.0)],
+            now + Duration::from_millis(50)
+        ));
+
+        // Brightness's echo arrives. It says nothing about the colour.
+        p.reconcile(
+            "light.a",
+            &[
+                echo(BRIGHTNESS, Some(100.0)),
+                colour_echo(Some(10.0), Some(20.0)),
+            ],
+        );
+
+        assert_eq!(
+            p.shown("light.a", HUE),
+            Some(132.0),
+            "the colour is still under the finger"
+        );
+        assert_eq!(p.shown("light.a", SATURATION), Some(100.0));
+
+        let flushed = p.release(
+            "light.a",
+            &[HUE, SATURATION],
+            now + Duration::from_millis(300),
+        );
+        assert_eq!(flushed, Some(vec![(HUE, 132.0), (SATURATION, 100.0)]));
     }
 
     /// The slack is colour temperature's, not everybody's. Brightness
