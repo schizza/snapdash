@@ -512,6 +512,7 @@ fn style() -> Style {
         fill: Color::BLACK,
         marker: Color::WHITE,
         marker_shadow: Color::BLACK,
+        opacity: 1.0,
     }
 }
 
