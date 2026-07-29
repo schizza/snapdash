@@ -313,8 +313,9 @@ fn light_is_dimmable(state: &EntityState) -> bool {
 ///
 /// `color_temp_kelvin` is `null` whenever the light is currently in some
 /// other mode, so the axis is offered on the strength of what the device
-/// *supports*, and the slider simply starts at its minimum until the
-/// light is put into that mode.
+/// *supports* rather than of what it happens to be doing. Until the
+/// light is put into that mode the axis has no value, and the control
+/// renders as absent (`docs/adr/0006-a-null-axis-renders-as-absent.md`).
 fn light_has_color_temp(state: &EntityState) -> bool {
     let Some(Value::Array(modes)) = state.attributes.get("supported_color_modes") else {
         return false;
@@ -630,7 +631,8 @@ mod tests {
 
     /// `color_temp_kelvin` is null whenever the light sits in another
     /// colour mode. The axis is still offered, because the device
-    /// supports it, and the slider simply starts at its minimum.
+    /// supports it, and it carries no value until the light is in that
+    /// mode.
     #[test]
     fn colour_temperature_survives_the_light_being_in_another_mode() {
         let s = state(

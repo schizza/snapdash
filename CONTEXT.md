@@ -43,6 +43,12 @@ One numeric dimension of an entity that is set rather than toggled, such as brig
 An entity may expose several at once, each with its own range reported by Home Assistant.
 _Avoid_: slider, analog, channel
 
+**Absent axis**:
+An axis Home Assistant is currently reporting as `null`, meaning the device is not driving that dimension at all.
+Absent is a reading of the present, not a gap in the record, and it is rendered as such: dimmed, with no knob and no readout.
+It is never rendered as the axis minimum, for reasons recorded in `docs/adr/0006-a-null-axis-renders-as-absent.md`.
+_Avoid_: missing, unknown, zero, unset
+
 **Armed**:
 A widget with confirmation enabled that has taken its first tap and is awaiting a second.
 Being armed has a bounded life: it ends on confirmation, on cancellation, on a timeout, or when the pointer leaves the widget.

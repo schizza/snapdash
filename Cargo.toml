@@ -97,6 +97,7 @@ keyring = { version = "3.6.3", features = [
 
 [dev-dependencies]
 tempfile = "3.27.0"
+wiremock = "0.6.5"
 
 [patch.crates-io]
 iced = { git = "https://github.com/schizza/iced.git", tag = "snapdash-v0.14.0-p10" }

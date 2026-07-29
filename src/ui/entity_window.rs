@@ -140,44 +140,86 @@ fn control_block<'a>(
     p: Palette,
 ) -> Element<'a, Message> {
     match &view.control {
-        Control::Value(axis) => control_row(entity_id, axis, view.pending(0), font, p),
+        Control::Value(axis) => control_row(entity_id, axis, view.value(0), font, p),
+    }
+}
+
+/// How much of its normal presence a control keeps while nothing is
+/// driving the axis it belongs to.
+///
+/// Faint enough to read as "not in play" without a second look, and
+/// solid enough that the label stays legible: the control is still fully
+/// operable, and grabbing it is precisely how the axis gets a value.
+const ABSENT_OPACITY: f32 = 0.4;
+
+/// The same colour, scaled towards transparent.
+///
+/// Scaling the existing alpha rather than replacing it keeps a palette's
+/// own translucency intact, so a theme that already ships a soft rail
+/// does not come back opaque.
+fn fade(color: iced::Color, opacity: f32) -> iced::Color {
+    iced::Color {
+        a: color.a * opacity,
+        ..color
+    }
+}
+
+fn fade_background(background: iced::Background, opacity: f32) -> iced::Background {
+    match background {
+        iced::Background::Color(color) => fade(color, opacity).into(),
+        other => other,
     }
 }
 
 /// One axis inside an expanded widget: a label with its readout, and the
 /// slider beneath.
 ///
-/// The slider renders the *pending* value whenever the user is driving
-/// it, falling back to what HA reported once the interaction reconciles.
-/// Falling back to `min` keeps the slider in range for an entity that
-/// reports no value at all, such as an unavailable light with no
-/// brightness. See `crate::app::pending`.
+/// `value` is what [`ControlView::value`] resolved for this axis, and
+/// `None` there means Home Assistant is reporting the axis as null. The
+/// row then renders as *absent* rather than as sitting at its minimum:
+/// the whole block dims and the knob is not drawn at all. A rail with no
+/// knob says "this axis has no value right now" in a way that cannot be
+/// misread as "the value is at the minimum", which is exactly what a
+/// knob parked hard left over a "0%" readout does say (#94).
+///
+/// Nothing about the row's *behaviour* changes. Grabbing it sends the
+/// same service call, and for a light that is off `light.turn_on` is
+/// also what turns the light on.
 fn control_row<'a>(
     entity_id: &str,
     control: &Axis,
-    pending: Option<f32>,
+    value: Option<f32>,
     font: f32,
     p: Palette,
 ) -> Element<'a, Message> {
-    let value = pending
-        .or(control.current)
-        .unwrap_or(control.min)
-        .clamp(control.min, control.max);
+    let absent = value.is_none();
+    let opacity = if absent { ABSENT_OPACITY } else { 1.0 };
+    let label_color = fade(p.text_dim, opacity);
+    let value_color = fade(p.text_secondary, opacity);
+
+    // The slider still needs a position in range to lay itself out. It
+    // is the minimum, but with the knob hidden nothing renders there.
+    let position = value.unwrap_or(control.min);
 
     let label = text(axis_label(control.kind))
         .size(font)
         .style(move |_: &iced::Theme| iced::widget::text::Style {
-            color: Some(p.text_dim),
+            color: Some(label_color),
         });
 
-    let value_text = text(readout(control, value))
-        .size(font)
-        .style(move |_: &iced::Theme| iced::widget::text::Style {
-            color: Some(p.text_secondary),
-        });
+    // A readout is a statement about the device, so an axis the device
+    // is not driving has nothing to state.
+    let value_text = text(match value {
+        Some(value) => readout(control, value),
+        None => "-".to_owned(),
+    })
+    .size(font)
+    .style(move |_: &iced::Theme| iced::widget::text::Style {
+        color: Some(value_color),
+    });
 
     let axis = control.kind;
-    let bar = iced::widget::slider(control.min..=control.max, value, {
+    let bar = iced::widget::slider(control.min..=control.max, position, {
         let entity_id = entity_id.to_owned();
         move |value: f32| Message::ControlValueChanged {
             entity_id: entity_id.clone(),
@@ -189,6 +231,24 @@ fn control_row<'a>(
     .on_release(Message::ControlReleased {
         entity_id: entity_id.to_owned(),
         axis,
+    })
+    .style(move |theme: &iced::Theme, status| {
+        let mut style = iced::widget::slider::default(theme, status);
+
+        if absent {
+            style.rail.backgrounds = (
+                fade_background(style.rail.backgrounds.0, ABSENT_OPACITY),
+                fade_background(style.rail.backgrounds.1, ABSENT_OPACITY),
+            );
+            // A transparent handle is how the knob is removed: the
+            // slider keeps its geometry and its hit area, so the row
+            // stays draggable, and only the mark that would claim a
+            // value goes away.
+            style.handle.background = iced::Color::TRANSPARENT.into();
+            style.handle.border_color = iced::Color::TRANSPARENT;
+        }
+
+        style
     });
 
     column![
@@ -250,6 +310,27 @@ impl ControlView {
     /// The pending value of the `n`th axis this control drives.
     fn pending(&self, index: usize) -> Option<f32> {
         self.pending.get(index).copied().flatten()
+    }
+
+    /// The value the `n`th axis renders at, or `None` when nothing is
+    /// currently driving it.
+    ///
+    /// A pending value wins while the user is driving that axis, and
+    /// Home Assistant takes over again once the interaction reconciles.
+    ///
+    /// `None` is a reading rather than a gap in the record. Home
+    /// Assistant nulls an axis the device is not currently driving:
+    /// every colour attribute of a light that is off, and
+    /// `color_temp_kelvin` on its own whenever the light is in some
+    /// other colour mode. Answering the axis minimum instead would turn
+    /// "there is no brightness" into "the brightness is zero", which is
+    /// a claim about the bulb, and a false one (#94).
+    pub fn value(&self, index: usize) -> Option<f32> {
+        let axis = self.control.axes().nth(index)?;
+
+        self.pending(index)
+            .or(axis.current)
+            .map(|value| value.clamp(axis.min, axis.max))
     }
 }
 

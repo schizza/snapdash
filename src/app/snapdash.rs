@@ -512,6 +512,26 @@ impl Snapdash {
             .unwrap_or_default()
     }
 
+    /// Every control an entity offers, in display order, each carrying
+    /// the locally-held value of the axes it drives.
+    ///
+    /// This is what the expanded card is built from, and it is the only
+    /// place that answers "what does this widget offer for this axis
+    /// right now?". Kept on `Snapdash` rather than in the view so the
+    /// answer can be asserted on without rendering anything.
+    pub fn control_views(&self, entity_id: &str) -> Vec<crate::ui::entity_window::ControlView> {
+        self.controls_for(entity_id)
+            .into_iter()
+            .map(|control| crate::ui::entity_window::ControlView {
+                pending: control
+                    .axes()
+                    .map(|axis| self.pending.shown(entity_id, axis.kind))
+                    .collect(),
+                control,
+            })
+            .collect()
+    }
+
     /// Turn a raw slider value into the right service call for that axis,
     /// then dispatch it.
     fn send_axis(
