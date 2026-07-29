@@ -109,6 +109,9 @@ fn readout(control: &Axis, value: f32) -> String {
         // Kelvin is the unit users actually see on a bulb's box, so it
         // is shown as-is rather than rescaled to a percentage.
         AxisKind::ColorTemp => format!("{:.0}K", value.round()),
+        // Degrees around the wheel, which is the unit the value is in and
+        // the only one it has. A percentage of 359 would mean nothing.
+        AxisKind::Hue => format!("{:.0}°", value.round()),
         AxisKind::Position => format!("{:.0}%", value.round()),
         AxisKind::Temperature => {
             if control.step < 1.0 {
@@ -124,6 +127,7 @@ fn axis_label(kind: AxisKind) -> &'static str {
     match kind {
         AxisKind::Brightness => "Brightness",
         AxisKind::ColorTemp => "White",
+        AxisKind::Hue => "Hue",
         AxisKind::Temperature => "Target",
         AxisKind::Position => "Position",
     }
@@ -395,6 +399,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
             // back here and there is no header affordance for them.
             ActionKind::SetBrightness(_)
             | ActionKind::SetColorTemp(_)
+            | ActionKind::SetHs { .. }
             | ActionKind::SetTemperature(_)
             | ActionKind::SetPosition(_) => return None,
         };

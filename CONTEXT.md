@@ -39,7 +39,7 @@ A toggle, a scene activation or a script run.
 _Avoid_: tap action, default action
 
 **Axis**:
-One numeric dimension of an entity that is set rather than toggled, such as brightness, white colour temperature, thermostat setpoint or cover position.
+One numeric dimension of an entity that is set rather than toggled, such as brightness, white colour temperature, hue, thermostat setpoint or cover position.
 An entity may expose several at once, each with its own range reported by Home Assistant.
 An axis need not have a control of its own: hue and saturation are two axes driven by a single colour surface.
 _Avoid_: slider, analog, channel

@@ -151,6 +151,34 @@ pub fn light_off_attributes() -> Value {
     })
 }
 
+/// What Home Assistant reports for a bulb whose native colour mode is
+/// **rgb**, on and showing a colour.
+///
+/// The two arguments have to be given together because they are the same
+/// fact stated twice. `rgb_color` is what the light actually stores, and
+/// Home Assistant *derives* `hs_color` and `xy_color` from it on every
+/// state build. A hue that goes out as an integer therefore comes back
+/// through 8-bit RGB, and not as the number Snapdash sent - which is the
+/// whole reason this seam needs an rgb light and not only the `hs` one
+/// above. A template light backed by `input_number` helpers stores hue
+/// verbatim and would confirm any tolerance at all.
+///
+/// Note the absence of the `color_temp` and `mireds` keys: Home
+/// Assistant only reports those for a light that advertises the
+/// `color_temp` mode, and this one does not.
+pub fn rgb_light_attributes(rgb_color: [u8; 3], hs_color: [f64; 2], xy_color: [f64; 2]) -> Value {
+    json!({
+        "supported_color_modes": ["rgb"],
+        "color_mode": "rgb",
+        "brightness": 199,
+        "hs_color": hs_color,
+        "rgb_color": rgb_color,
+        "xy_color": xy_color,
+        "friendly_name": "Desk lamp",
+        "supported_features": 0
+    })
+}
+
 /// The same bulb **on**, sitting in `color_temp` mode.
 pub fn light_on_attributes() -> Value {
     json!({

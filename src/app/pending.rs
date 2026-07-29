@@ -292,6 +292,7 @@ mod tests {
 
     const BRIGHTNESS: AxisKind = AxisKind::Brightness;
     const TEMP: AxisKind = AxisKind::ColorTemp;
+    const HUE: AxisKind = AxisKind::Hue;
 
     fn t0() -> Instant {
         Instant::now()
@@ -346,6 +347,13 @@ mod tests {
                 now + Duration::from_millis(10)
             ),
             "shares the entity's window"
+        );
+        // And so does every axis added since: the window belongs to the
+        // light, so a bulb with a colour control does not send faster
+        // than one without.
+        assert!(
+            !p.set("light.a", &[(HUE, 200.0)], now + Duration::from_millis(20)),
+            "colour shares the same window as brightness"
         );
         // A different entity is unaffected.
         assert!(p.set(
@@ -594,6 +602,34 @@ mod tests {
         p.set("light.a", &[(TEMP, 3000.0)], now);
         assert!(!p.reconcile("light.a", &[(TEMP, Some(3050.0))]));
         assert_eq!(p.shown("light.a", TEMP), Some(3000.0));
+    }
+
+    /// A light whose native mode is RGB stores the colour as three bytes,
+    /// so the hue that comes back is whatever those bytes convert to.
+    /// Hue 132 at full saturation is stored as `rgb(0, 255, 50)` and read
+    /// back as 131.765 - the worst case anywhere on the wheel. Without
+    /// slack for it the axis would run to the settle timeout on exactly
+    /// the lights the control exists for.
+    #[test]
+    fn hue_reconciles_across_the_eight_bit_rgb_round_trip() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", &[(HUE, 132.0)], now);
+        assert!(p.reconcile("light.a", &[(HUE, Some(131.765))]));
+    }
+
+    /// And no more slack than that. The wheel is dragged in whole
+    /// degrees, so a tolerance that reached a neighbouring degree would
+    /// let the light confirm a colour the user did not pick.
+    #[test]
+    fn hue_does_not_reconcile_against_a_neighbouring_degree() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", &[(HUE, 132.0)], now);
+        assert!(!p.reconcile("light.a", &[(HUE, Some(133.0))]));
+        assert_eq!(p.shown("light.a", HUE), Some(132.0));
     }
 
     /// The slack is colour temperature's, not everybody's. Brightness

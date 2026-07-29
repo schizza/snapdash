@@ -61,8 +61,9 @@ fn http() -> &'static reqwest::Client {
 /// A concrete Home Assistant service call.
 ///
 /// Phase 1 variants are zero-argument: HA decides the resulting state.
-/// Phase 2 variants carry the value being set. The enum stays `Copy`
-/// because every payload is a scalar.
+/// Phase 2 variants carry the value being set. The enum stays `Copy`:
+/// a payload is a scalar, or - where the service takes a colour - a
+/// fixed-size group of them, and nothing here owns an allocation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ActionKind {
     /// `switch.toggle` - HA flips it based on current state.
@@ -79,6 +80,19 @@ pub enum ActionKind {
     SetBrightness(u8),
     /// `light.turn_on` with `color_temp_kelvin`.
     SetColorTemp(u32),
+    /// `light.turn_on` with `hs_color`.
+    ///
+    /// Hue and saturation travel together because the service parameter
+    /// is one two-element array: there is no way to name one of them on
+    /// the wire without also naming the other.
+    ///
+    /// `hs_color` is a universal input rather than a mode-specific one.
+    /// Home Assistant's `process_turn_on_params` converts it into
+    /// whatever space the light actually supports - RGB, RGBW, RGBWW, XY,
+    /// or as a last resort back to a colour temperature - so Snapdash
+    /// sends hue and saturation whatever the bulb is, and never has to
+    /// branch on the device's native colour mode.
+    SetHs { hue: u16, saturation: u8 },
     /// `climate.set_temperature` with `temperature`.
     SetTemperature(f32),
     /// `cover.set_cover_position` with `position` (0-100).
@@ -113,6 +127,14 @@ impl ActionKind {
                 "light",
                 "turn_on",
                 vec![("color_temp_kelvin", Value::from(v))],
+            ),
+            Self::SetHs { hue, saturation } => (
+                "light",
+                "turn_on",
+                vec![(
+                    "hs_color",
+                    Value::Array(vec![Value::from(hue), Value::from(saturation)]),
+                )],
             ),
             Self::SetTemperature(v) => (
                 "climate",
@@ -157,6 +179,8 @@ pub enum AxisKind {
     Brightness,
     /// White colour temperature of a light, in kelvin.
     ColorTemp,
+    /// Position on the colour wheel, in degrees.
+    Hue,
     Temperature,
     Position,
 }
@@ -176,6 +200,32 @@ impl AxisKind {
     /// actually sends, the worst case is 19 K (6350 K comes back as
     /// 6369 K). 25 K clears that comfortably while staying at half the
     /// step, so it can never confirm a neighbouring stop.
+    ///
+    /// Hue is lossy for the same reason and by much less. A light whose
+    /// native mode is RGB stores the colour as three bytes, so the hue
+    /// that comes back is whatever those bytes convert to: the worst
+    /// case over the whole wheel at full saturation is 0.235 degrees
+    /// (hue 132 is stored as `rgb(0, 255, 50)` and read back as
+    /// 131.765). 0.5 clears that by better than double while staying at
+    /// half the 1-degree step, so a neighbouring degree can never
+    /// confirm.
+    ///
+    /// A light whose native mode is `xy` is a different matter. Colour
+    /// reaches it through a gamut conversion rather than a quantisation,
+    /// and roughly a third of the wheel comes back more than 0.5 degrees
+    /// out, up to 2.7 at hue 242. Widening to cover that would take the
+    /// slack past the 1-degree step and let a neighbouring colour confirm
+    /// a drag, so those lights reconcile on the settle timeout instead of
+    /// on the echo. The way out is the one variable saturation forces
+    /// too: compare in RGB rather than in degrees.
+    ///
+    /// That bound holds because saturation is currently pinned at 100,
+    /// where a byte of RGB is worth the least hue. As saturation falls
+    /// the same byte spans more of the wheel and the error grows to
+    /// roughly `20 / saturation` degrees, which no fixed number on this
+    /// axis can absorb without also confirming colours the user did not
+    /// pick. When saturation becomes settable, the comparison moves off
+    /// the axis and into the colour control, and is made in RGB.
     pub fn echo_tolerance(self) -> f32 {
         match self {
             // A setpoint round-trips through HA as a float and may come
@@ -183,6 +233,7 @@ impl AxisKind {
             // is all this needs to absorb.
             Self::Brightness | Self::Temperature | Self::Position => 0.01,
             Self::ColorTemp => 25.0,
+            Self::Hue => 0.5,
         }
     }
 }
@@ -203,6 +254,17 @@ pub struct Axis {
     pub current: Option<f32>,
 }
 
+/// The saturation every hue send carries.
+///
+/// Saturation is not yet something the user can set, and full is the only
+/// honest default while that is true. Sending the light's *current*
+/// saturation instead looks more conservative and is not: Home Assistant
+/// derives an `hs_color` for a light sitting in `color_temp` mode, and
+/// its saturation is the low one of a white, so a drag of the hue control
+/// would send a colour the eye cannot tell from the white already showing
+/// and the control would look broken.
+const HUE_SATURATION: u8 = 100;
+
 impl Axis {
     /// Build the action that sets this dimension to `value`.
     pub fn action(&self, value: f32) -> ActionKind {
@@ -210,6 +272,10 @@ impl Axis {
         match self.kind {
             AxisKind::Brightness => ActionKind::SetBrightness(clamped as u8),
             AxisKind::ColorTemp => ActionKind::SetColorTemp(clamped as u32),
+            AxisKind::Hue => ActionKind::SetHs {
+                hue: clamped as u16,
+                saturation: HUE_SATURATION,
+            },
             AxisKind::Temperature => ActionKind::SetTemperature(clamped),
             AxisKind::Position => ActionKind::SetPosition(clamped as u8),
         }
@@ -285,6 +351,25 @@ fn attr_f32(state: &EntityState, key: &str) -> Option<f32> {
     }
 }
 
+/// The hue Home Assistant is currently reporting, read out of the two
+/// elements of `hs_color`.
+///
+/// Its own reader because `hs_color` is the one attribute Snapdash takes
+/// a value from that is not a scalar, and [`attr_f32`] would answer
+/// `None` for it.
+///
+/// The attribute says what colour the light is showing and nothing about
+/// which mode it is in: Home Assistant *derives* an `hs_color` from the
+/// kelvin value whenever the active mode is `color_temp`, so it is
+/// present for a bulb sitting in plain white. Discovery is keyed on
+/// `supported_color_modes` for that reason, never on this.
+fn attr_hue(state: &EntityState) -> Option<f32> {
+    match state.attributes.get("hs_color")? {
+        Value::Array(hs) => hs.first()?.as_f64().map(|hue| hue as f32),
+        _ => None,
+    }
+}
+
 fn supported_features(state: &EntityState) -> u64 {
     state
         .attributes
@@ -293,19 +378,46 @@ fn supported_features(state: &EntityState) -> u64 {
         .unwrap_or(0)
 }
 
+/// The colour modes a light advertises as supported.
+///
+/// Every light capability Snapdash discovers is read from this one list,
+/// and from the *supported* list rather than the active `color_mode`.
+/// `color_mode` is `None` whenever the light is off, so keying on it
+/// would make controls appear and disappear as the light is switched.
+fn color_modes(state: &EntityState) -> impl Iterator<Item = &str> {
+    match state.attributes.get("supported_color_modes") {
+        Some(Value::Array(modes)) => modes.as_slice(),
+        _ => &[],
+    }
+    .iter()
+    .filter_map(Value::as_str)
+}
+
+/// The colour modes that carry a full colour, `COLOR_MODES_COLOR` in
+/// Home Assistant's `light/const.py`.
+///
+/// A light in any one of these can be given a hue. `color_temp` and
+/// `white` are deliberately absent: they are modes for producing white
+/// light and a hue means nothing in them.
+const COLOR_MODES_COLOR: &[&str] = &["hs", "rgb", "rgbw", "rgbww", "xy"];
+
 /// A light is dimmable when it advertises any color mode other than
 /// plain on/off. `onoff` and `unknown` are the two modes that carry no
 /// brightness channel; everything else (`brightness`, `color_temp`,
 /// `hs`, `xy`, `rgb`, `rgbw`, `rgbww`, `white`) does.
 fn light_is_dimmable(state: &EntityState) -> bool {
-    let Some(Value::Array(modes)) = state.attributes.get("supported_color_modes") else {
-        return false;
-    };
+    color_modes(state).any(|m| !matches!(m, "onoff" | "unknown"))
+}
 
-    modes
-        .iter()
-        .filter_map(Value::as_str)
-        .any(|m| !matches!(m, "onoff" | "unknown"))
+/// A light can be given a colour when it advertises any of the colour
+/// modes, not `hs` alone.
+///
+/// The distinction matters because `hs_color` is a universal input:
+/// Home Assistant converts it into whichever space the device natively
+/// speaks. An `rgb`-only bulb takes hue and saturation perfectly well
+/// and would be left with no colour control by a narrower predicate.
+fn light_has_colour(state: &EntityState) -> bool {
+    color_modes(state).any(|m| COLOR_MODES_COLOR.contains(&m))
 }
 
 /// A light supports white colour temperature when it advertises the
@@ -317,14 +429,7 @@ fn light_is_dimmable(state: &EntityState) -> bool {
 /// light is put into that mode the axis has no value, and the control
 /// renders as absent (`docs/adr/0006-a-null-axis-renders-as-absent.md`).
 fn light_has_color_temp(state: &EntityState) -> bool {
-    let Some(Value::Array(modes)) = state.attributes.get("supported_color_modes") else {
-        return false;
-    };
-
-    modes
-        .iter()
-        .filter_map(Value::as_str)
-        .any(|m| m == "color_temp")
+    color_modes(state).any(|m| m == "color_temp")
 }
 
 /// Every control an entity offers, in the order they should be shown.
@@ -361,6 +466,22 @@ fn controls(state: &EntityState) -> Vec<Control> {
                     // difference between neighbours.
                     step: 50.0,
                     current: attr_f32(state, "color_temp_kelvin"),
+                }));
+            }
+
+            if light_has_colour(state) {
+                controls.push(Control::Value(Axis {
+                    kind: AxisKind::Hue,
+                    min: 0.0,
+                    // Capped at 359 rather than 360. The two ends of the
+                    // wheel are the same red, so a 360th stop would be a
+                    // second name for the value at 0 and every piece of
+                    // state that compares hues would have to know it.
+                    // Red still appears at both ends of the strip, as it
+                    // does in every hue field.
+                    max: 359.0,
+                    step: 1.0,
+                    current: attr_hue(state),
                 }));
             }
         }
@@ -579,6 +700,17 @@ mod tests {
             call(ActionKind::SetColorTemp(3000)),
             ("light", "turn_on", vec![("color_temp_kelvin", json!(3000))])
         );
+        // One parameter, carrying both numbers. Brightness is deliberately
+        // not sent with it: `light.turn_on` without `brightness` leaves
+        // the light's brightness where it was, so one control sets one
+        // thing and the colour cannot dim the lamp behind the user's back.
+        assert_eq!(
+            call(ActionKind::SetHs {
+                hue: 200,
+                saturation: 100
+            }),
+            ("light", "turn_on", vec![("hs_color", json!([200, 100]))])
+        );
     }
 
     #[test]
@@ -649,6 +781,84 @@ mod tests {
             .expect("still supported, just not active");
 
         assert_eq!(temp.current, None);
+    }
+
+    /// The predicate is `COLOR_MODES_COLOR` and not `hs` alone. Hue and
+    /// saturation are a universal input that Home Assistant converts into
+    /// whatever the device natively speaks, so every one of these bulbs
+    /// takes a colour, and an `hs`-only check would leave the most common
+    /// of them - a plain RGB strip - with no colour control at all.
+    #[test]
+    fn every_colour_mode_offers_a_hue_control() {
+        for mode in ["hs", "rgb", "rgbw", "rgbww", "xy"] {
+            let s = state(
+                "light.strip",
+                json!({ "supported_color_modes": [mode], "hs_color": [120.0, 100.0] }),
+            );
+            let caps = Capabilities::from_state(&s);
+
+            let hue = caps
+                .axis(AxisKind::Hue)
+                .unwrap_or_else(|| panic!("{mode} is a colour mode"));
+            assert_eq!(hue.current, Some(120.0), "{mode}");
+        }
+    }
+
+    /// The negatives, and the reason the check cannot simply be "not
+    /// on/off": `brightness`, `color_temp` and `white` are all modes a
+    /// dimmable light reports, and none of them can show a colour.
+    #[test]
+    fn a_light_with_no_colour_mode_offers_no_hue_control() {
+        for mode in ["onoff", "brightness", "color_temp", "white"] {
+            let s = state(
+                "light.lamp",
+                json!({
+                    "supported_color_modes": [mode],
+                    // Given on purpose to every one of these, because
+                    // Home Assistant really does report an `hs_color`
+                    // for a light in `color_temp` mode: the attribute's
+                    // presence is never evidence of a colour capability,
+                    // and discovery must not be tempted to read it.
+                    "hs_color": [28.391, 65.659]
+                }),
+            );
+
+            assert!(
+                Capabilities::from_state(&s).axis(AxisKind::Hue).is_none(),
+                "{mode} is not a colour mode"
+            );
+        }
+    }
+
+    /// The wheel is `[0, 359]` in whole degrees. Capping at 359 rather
+    /// than 360 keeps one value per colour: the two ends are the same
+    /// red, and a 360th stop would be a second name for 0 that every
+    /// comparison of hues would then have to know about.
+    #[test]
+    fn hue_spans_the_wheel_capped_at_359() {
+        let s = state("light.strip", json!({ "supported_color_modes": ["rgb"] }));
+        let caps = Capabilities::from_state(&s);
+        let hue = caps.axis(AxisKind::Hue).expect("an rgb light has a hue");
+
+        assert_eq!((hue.min, hue.max, hue.step), (0.0, 359.0, 1.0));
+        // No `hs_color` at all, which is what an off light reports. The
+        // axis is offered because the device supports colour, and carries
+        // no value until it is showing one (#94).
+        assert_eq!(hue.current, None);
+    }
+
+    /// Home Assistant reports the colour as one two-element array, so the
+    /// hue has to be read out of it. The saturation beside it is not read
+    /// at all yet: every send pins it at full.
+    #[test]
+    fn hue_is_read_from_the_first_element_of_hs_color() {
+        let s = state(
+            "light.strip",
+            json!({ "supported_color_modes": ["rgb"], "hs_color": [199.765, 100.0] }),
+        );
+        let caps = Capabilities::from_state(&s);
+
+        assert_eq!(caps.axis(AxisKind::Hue).unwrap().current, Some(199.765));
     }
 
     #[test]
@@ -734,5 +944,28 @@ mod tests {
         assert_eq!(c.action(300.0), ActionKind::SetBrightness(255));
         assert_eq!(c.action(-20.0), ActionKind::SetBrightness(0));
         assert_eq!(c.action(128.0), ActionKind::SetBrightness(128));
+    }
+
+    /// The clamp is what keeps the wheel single-valued: a hue past the
+    /// top lands on 359 rather than wrapping to 0, so nothing downstream
+    /// has to reason about which end of the strip a value came from.
+    #[test]
+    fn a_hue_axis_sends_full_saturation_and_never_leaves_the_wheel() {
+        let hue = Axis {
+            kind: AxisKind::Hue,
+            min: 0.0,
+            max: 359.0,
+            step: 1.0,
+            current: None,
+        };
+
+        let hs = |hue: u16| ActionKind::SetHs {
+            hue,
+            saturation: 100,
+        };
+
+        assert_eq!(hue.action(200.4), hs(200));
+        assert_eq!(hue.action(400.0), hs(359));
+        assert_eq!(hue.action(-1.0), hs(0));
     }
 }
