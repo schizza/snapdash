@@ -1,30 +1,49 @@
+use crate::ha::{Axis, AxisKind, Control};
 use crate::helpers::humanize_magnitude;
 use crate::widget_size::WidgetSize;
 
-/// An entity with no axis has no controls to reveal, so there is nothing
+fn slider() -> Control {
+    Control::Value(Axis {
+        kind: AxisKind::Brightness,
+        min: 0.0,
+        max: 255.0,
+        step: 1.0,
+        current: None,
+    })
+}
+
+/// An entity with no control has nothing to reveal, so there is nothing
 /// to grow into and the widget stays at its preset.
 #[test]
-fn an_entity_with_no_axes_grows_by_nothing() {
+fn an_entity_with_no_controls_grows_by_nothing() {
     for &size in WidgetSize::ALL {
-        assert_eq!(size.controls_height(0), 0.0, "{size}");
+        assert_eq!(size.controls_height(&[]), 0.0, "{size}");
     }
 }
 
-/// `entity_window` puts a separating gap in front of every control row,
-/// so the height each axis costs is the gap plus the row. A widget that
+/// `entity_window` puts a separating gap in front of every control,
+/// so the height each one costs is the gap plus its body. A widget that
 /// counted one gap for the whole block came up short as soon as it had a
-/// second axis, and the last slider paid for it.
+/// second control, and the last slider paid for it.
 #[test]
-fn every_axis_costs_its_own_gap() {
+fn every_control_costs_its_own_gap() {
     for &size in WidgetSize::ALL {
-        let one = size.controls_height(1);
+        let one = size.controls_height(&[slider()]);
         assert_eq!(
             one,
             size.value_detail_gap() + size.control_row_height(),
             "{size}"
         );
-        assert_eq!(size.controls_height(2), one * 2.0, "{size}");
-        assert_eq!(size.controls_height(3), one * 3.0, "{size}");
+        assert_eq!(
+            size.controls_height(&[slider(), slider()]),
+            one * 2.0,
+            "{size}"
+        );
+        assert_eq!(
+            size.controls_height(&[slider(), slider(), slider()]),
+            one * 3.0,
+            "{size}"
+        );
     }
 }
 

@@ -1,5 +1,5 @@
 //! Pending values: the local override that wins over Home Assistant
-//! truth while the user is driving a continuous control.
+//! truth while the user is driving a control.
 //!
 //! Sends are throttled during a drag, so HA keeps broadcasting
 //! `state_changed` with values that lag the user's finger. Binding a
@@ -21,7 +21,7 @@
 //! constant. An axis whose value passes through a unit conversion on the
 //! way back does not return the number we sent, and how much it loses is
 //! a fact about that conversion, not about floats. See
-//! [`ContinuousKind::echo_tolerance`].
+//! [`AxisKind::echo_tolerance`].
 //!
 //! State is kept **per axis**, so brightness and colour temperature
 //! reconcile independently and neither overwrites the other. Throttling
@@ -35,7 +35,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::ha::ContinuousKind;
+use crate::ha::AxisKind;
 
 /// Minimum gap between service calls for one entity while it is being
 /// driven. Caps the send rate at ~5/sec, which is what keeps REST viable
@@ -81,7 +81,7 @@ impl Pending {
     /// `kind` decides how much slack the comparison gets, because the
     /// round trip through Home Assistant is lossy by different amounts
     /// for different axes.
-    fn reconciles(&self, kind: ContinuousKind, echoed: f32) -> bool {
+    fn reconciles(&self, kind: AxisKind, echoed: f32) -> bool {
         self.last_sent
             .is_some_and(|sent| (sent - echoed).abs() <= kind.echo_tolerance())
     }
@@ -93,7 +93,7 @@ impl Pending {
     }
 }
 
-type AxisKey = (String, ContinuousKind);
+type AxisKey = (String, AxisKind);
 
 /// All in-flight interactions.
 #[derive(Debug, Default)]
@@ -108,7 +108,7 @@ pub struct PendingValues {
 impl PendingValues {
     /// The locally-held value for one axis, if it currently has one.
     /// Callers render this in preference to the HA state.
-    pub fn shown(&self, entity_id: &str, kind: ContinuousKind) -> Option<f32> {
+    pub fn shown(&self, entity_id: &str, kind: AxisKind) -> Option<f32> {
         self.axes
             .get(&(entity_id.to_owned(), kind))
             .map(|pending| pending.shown)
@@ -134,7 +134,7 @@ impl PendingValues {
     pub fn set(
         &mut self,
         entity_id: &str,
-        kind: ContinuousKind,
+        kind: AxisKind,
         value: f32,
         now: Instant,
     ) -> Option<f32> {
@@ -158,7 +158,7 @@ impl PendingValues {
     /// The user released the control. Always returns the final value to
     /// send, so an interaction never ends on a throttled-away
     /// intermediate, and starts the settle window.
-    pub fn release(&mut self, entity_id: &str, kind: ContinuousKind, now: Instant) -> Option<f32> {
+    pub fn release(&mut self, entity_id: &str, kind: AxisKind, now: Instant) -> Option<f32> {
         let pending = self.axes.get_mut(&(entity_id.to_owned(), kind))?;
         let value = pending.shown;
 
@@ -176,7 +176,7 @@ impl PendingValues {
     /// of it is still waiting. `false` means the caller must keep
     /// rendering the pending values and ignore this echo, because
     /// applying it would drag a slider back under the user's finger.
-    pub fn reconcile(&mut self, entity_id: &str, echoed: &[(ContinuousKind, Option<f32>)]) -> bool {
+    pub fn reconcile(&mut self, entity_id: &str, echoed: &[(AxisKind, Option<f32>)]) -> bool {
         for (kind, value) in echoed {
             let key = (entity_id.to_owned(), *kind);
             let Some(pending) = self.axes.get(&key) else {
@@ -244,8 +244,8 @@ impl PendingValues {
 mod tests {
     use super::*;
 
-    const BRIGHTNESS: ContinuousKind = ContinuousKind::Brightness;
-    const TEMP: ContinuousKind = ContinuousKind::ColorTemp;
+    const BRIGHTNESS: AxisKind = AxisKind::Brightness;
+    const TEMP: AxisKind = AxisKind::ColorTemp;
 
     fn t0() -> Instant {
         Instant::now()
@@ -439,8 +439,8 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("climate.a", ContinuousKind::Temperature, 21.5, now);
-        assert!(p.reconcile("climate.a", &[(ContinuousKind::Temperature, Some(21.502))]));
+        p.set("climate.a", AxisKind::Temperature, 21.5, now);
+        assert!(p.reconcile("climate.a", &[(AxisKind::Temperature, Some(21.502))]));
     }
 
     /// A light that stores mireds internally round-trips kelvin through

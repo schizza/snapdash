@@ -136,9 +136,8 @@ impl ActionKind {
     /// The zero-argument action a widget fires from its header icon, or
     /// `None` for entities that only display.
     ///
-    /// Derivable from the entity id alone, unlike [`ContinuousControl`],
-    /// because every primary action is a plain domain-level toggle or
-    /// trigger.
+    /// Derivable from the entity id alone, unlike an [`Axis`], because
+    /// every primary action is a plain domain-level toggle or trigger.
     pub fn primary_for_entity(entity_id: &str) -> Option<Self> {
         match domain(entity_id) {
             "switch" => Some(Self::ToggleSwitch),
@@ -151,10 +150,10 @@ impl ActionKind {
     }
 }
 
-/// Which dimension a [`ContinuousControl`] adjusts. Determines the
-/// action built on release and how the value is presented.
+/// Which dimension an [`Axis`] adjusts. Determines the action built
+/// on release and how the value is presented.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ContinuousKind {
+pub enum AxisKind {
     Brightness,
     /// White colour temperature of a light, in kelvin.
     ColorTemp,
@@ -162,7 +161,7 @@ pub enum ContinuousKind {
     Position,
 }
 
-impl ContinuousKind {
+impl AxisKind {
     /// How far an echo may sit from the value we sent and still count as
     /// confirmation of it.
     ///
@@ -195,8 +194,8 @@ impl ContinuousKind {
 /// because HA reports per-device limits (a thermostat's `min_temp` and
 /// `max_temp` vary by device and by unit system).
 #[derive(Debug, Clone, PartialEq)]
-pub struct ContinuousControl {
-    pub kind: ContinuousKind,
+pub struct Axis {
+    pub kind: AxisKind,
     pub min: f32,
     pub max: f32,
     pub step: f32,
@@ -204,15 +203,42 @@ pub struct ContinuousControl {
     pub current: Option<f32>,
 }
 
-impl ContinuousControl {
+impl Axis {
     /// Build the action that sets this dimension to `value`.
     pub fn action(&self, value: f32) -> ActionKind {
         let clamped = value.clamp(self.min, self.max);
         match self.kind {
-            ContinuousKind::Brightness => ActionKind::SetBrightness(clamped as u8),
-            ContinuousKind::ColorTemp => ActionKind::SetColorTemp(clamped as u32),
-            ContinuousKind::Temperature => ActionKind::SetTemperature(clamped),
-            ContinuousKind::Position => ActionKind::SetPosition(clamped as u8),
+            AxisKind::Brightness => ActionKind::SetBrightness(clamped as u8),
+            AxisKind::ColorTemp => ActionKind::SetColorTemp(clamped as u32),
+            AxisKind::Temperature => ActionKind::SetTemperature(clamped),
+            AxisKind::Position => ActionKind::SetPosition(clamped as u8),
+        }
+    }
+}
+
+/// One thing the user grabs in an expanded widget.
+///
+/// An [`Axis`] is a numeric dimension of the entity; a `Control` is the
+/// affordance that drives one. They have been 1:1 so far, which is why
+/// they were the same type, but they are not the same concept: a colour
+/// surface is one control setting two axes with one gesture and one
+/// service call.
+///
+/// The enum exists so that grouping is a fact of the type rather than a
+/// convention. A flat list with a "these belong together" marker would
+/// permit a hue with no saturation beside it, and nothing would catch
+/// it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Control {
+    /// A single axis, dragged on a slider of its own.
+    Value(Axis),
+}
+
+impl Control {
+    /// Every axis this control drives, in the order it presents them.
+    pub fn axes(&self) -> impl Iterator<Item = &Axis> {
+        match self {
+            Self::Value(axis) => std::slice::from_ref(axis).iter(),
         }
     }
 }
@@ -222,27 +248,32 @@ impl ContinuousControl {
 pub struct Capabilities {
     /// Fired by the widget's header icon.
     pub primary: Option<ActionKind>,
-    /// Every axis the entity exposes, adjusted from the expanded widget.
-    /// Empty for an entity with nothing to set.
-    pub continuous: Vec<ContinuousControl>,
+    /// Every control the entity offers, in the order the expanded widget
+    /// shows them. Empty for an entity with nothing to set.
+    pub controls: Vec<Control>,
 }
 
 impl Capabilities {
     pub fn from_state(state: &EntityState) -> Self {
         Self {
             primary: ActionKind::primary_for_entity(&state.entity_id),
-            continuous: continuous_controls(state),
+            controls: controls(state),
         }
     }
 
+    /// Every axis the entity exposes, across all of its controls.
+    pub fn axes(&self) -> impl Iterator<Item = &Axis> {
+        self.controls.iter().flat_map(Control::axes)
+    }
+
     /// The axis of a given kind, when the entity has one.
-    pub fn axis(&self, kind: ContinuousKind) -> Option<&ContinuousControl> {
-        self.continuous.iter().find(|c| c.kind == kind)
+    pub fn axis(&self, kind: AxisKind) -> Option<&Axis> {
+        self.axes().find(|a| a.kind == kind)
     }
 
     /// `true` when the entity can only be displayed, never acted on.
     pub fn is_display_only(&self) -> bool {
-        self.primary.is_none() && self.continuous.is_empty()
+        self.primary.is_none() && self.controls.is_empty()
     }
 }
 
@@ -295,33 +326,33 @@ fn light_has_color_temp(state: &EntityState) -> bool {
         .any(|m| m == "color_temp")
 }
 
-/// Every axis an entity exposes, in the order they should be shown.
+/// Every control an entity offers, in the order they should be shown.
 ///
 /// A light can carry more than one, which is why this returns a list.
 /// Each axis reconciles independently, but they share one send throttle
 /// per entity, so the peak call rate does not grow with the axis count
 /// (`docs/adr/0003-service-calls-stay-on-rest.md`).
-fn continuous_controls(state: &EntityState) -> Vec<ContinuousControl> {
+fn controls(state: &EntityState) -> Vec<Control> {
     let mut controls = Vec::new();
 
     match domain(&state.entity_id) {
         "light" => {
             if light_is_dimmable(state) {
-                controls.push(ContinuousControl {
-                    kind: ContinuousKind::Brightness,
+                controls.push(Control::Value(Axis {
+                    kind: AxisKind::Brightness,
                     min: 0.0,
                     max: 255.0,
                     step: 1.0,
                     current: attr_f32(state, "brightness"),
-                });
+                }));
             }
 
             if light_has_color_temp(state) {
                 // Ranges are per-device. The fallbacks are HA's own
                 // defaults for a light that reports the mode but not its
                 // limits, which some integrations do.
-                controls.push(ContinuousControl {
-                    kind: ContinuousKind::ColorTemp,
+                controls.push(Control::Value(Axis {
+                    kind: AxisKind::ColorTemp,
                     min: attr_f32(state, "min_color_temp_kelvin").unwrap_or(2000.0),
                     max: attr_f32(state, "max_color_temp_kelvin").unwrap_or(6535.0),
                     // Kelvin spans thousands, so a 1 K step would be a
@@ -329,7 +360,7 @@ fn continuous_controls(state: &EntityState) -> Vec<ContinuousControl> {
                     // difference between neighbours.
                     step: 50.0,
                     current: attr_f32(state, "color_temp_kelvin"),
-                });
+                }));
             }
         }
 
@@ -337,25 +368,25 @@ fn continuous_controls(state: &EntityState) -> Vec<ContinuousControl> {
         // entity has no single setpoint to drag (it may be a range-only
         // thermostat, which is not covered).
         "climate" if supported_features(state) & 1 != 0 => {
-            controls.push(ContinuousControl {
-                kind: ContinuousKind::Temperature,
+            controls.push(Control::Value(Axis {
+                kind: AxisKind::Temperature,
                 min: attr_f32(state, "min_temp").unwrap_or(7.0),
                 max: attr_f32(state, "max_temp").unwrap_or(35.0),
                 step: attr_f32(state, "target_temp_step").unwrap_or(0.5),
                 current: attr_f32(state, "temperature"),
-            });
+            }));
         }
 
         // CoverEntityFeature.SET_POSITION == 4. Open/close-only covers
         // report 1|2 but not 4 and get no slider.
         "cover" if supported_features(state) & 4 != 0 => {
-            controls.push(ContinuousControl {
-                kind: ContinuousKind::Position,
+            controls.push(Control::Value(Axis {
+                kind: AxisKind::Position,
                 min: 0.0,
                 max: 100.0,
                 step: 1.0,
                 current: attr_f32(state, "current_position"),
-            });
+            }));
         }
 
         _ => {}
@@ -492,7 +523,7 @@ mod tests {
         assert!(is_widget_candidate("scene.evening"));
         assert!(is_widget_candidate("script.morning"));
         assert!(is_widget_candidate("input_boolean.guest_mode"));
-        // Continuous-control domains (#87). Candidates regardless of
+        // Domains that carry a control (#87). Candidates regardless of
         // whether the individual device supports a setpoint or position -
         // their state is worth displaying either way.
         assert!(is_widget_candidate("climate.thermostat"));
@@ -559,12 +590,12 @@ mod tests {
 
         assert_eq!(caps.primary, Some(ActionKind::ToggleLight));
         let c = caps
-            .axis(ContinuousKind::Brightness)
+            .axis(AxisKind::Brightness)
             .expect("dimmable light has a brightness axis");
         assert_eq!((c.min, c.max), (0.0, 255.0));
         assert_eq!(c.current, Some(128.0));
         // Brightness alone: this bulb advertises no colour temperature.
-        assert_eq!(caps.continuous.len(), 1);
+        assert_eq!(caps.controls.len(), 1);
     }
 
     /// A light can expose more than one axis, which is the whole reason
@@ -583,12 +614,15 @@ mod tests {
         );
         let caps = Capabilities::from_state(&s);
 
-        assert_eq!(caps.continuous.len(), 2);
+        assert_eq!(caps.controls.len(), 2);
         // Brightness first: it is the axis people reach for.
-        assert_eq!(caps.continuous[0].kind, ContinuousKind::Brightness);
+        assert_eq!(
+            caps.axes().map(|a| a.kind).collect::<Vec<_>>(),
+            vec![AxisKind::Brightness, AxisKind::ColorTemp]
+        );
 
         let temp = caps
-            .axis(ContinuousKind::ColorTemp)
+            .axis(AxisKind::ColorTemp)
             .expect("color_temp mode means a white axis");
         assert_eq!((temp.min, temp.max), (2202.0, 6535.0));
         assert_eq!(temp.current, Some(3000.0));
@@ -608,7 +642,7 @@ mod tests {
             }),
         );
         let temp = Capabilities::from_state(&s)
-            .axis(ContinuousKind::ColorTemp)
+            .axis(AxisKind::ColorTemp)
             .cloned()
             .expect("still supported, just not active");
 
@@ -616,20 +650,20 @@ mod tests {
     }
 
     #[test]
-    fn onoff_only_light_has_no_continuous_axes() {
+    fn onoff_only_light_has_no_axes() {
         let s = state("light.porch", json!({ "supported_color_modes": ["onoff"] }));
         let caps = Capabilities::from_state(&s);
 
         // Still tappable, just not adjustable. This is exactly the case
         // an entity-id-only check gets wrong.
         assert_eq!(caps.primary, Some(ActionKind::ToggleLight));
-        assert!(caps.continuous.is_empty());
+        assert!(caps.controls.is_empty());
     }
 
     #[test]
-    fn light_without_color_modes_has_no_continuous_axes() {
+    fn light_without_color_modes_has_no_axes() {
         let s = state("light.mystery", json!({}));
-        assert!(Capabilities::from_state(&s).continuous.is_empty());
+        assert!(Capabilities::from_state(&s).controls.is_empty());
     }
 
     #[test]
@@ -646,7 +680,7 @@ mod tests {
         );
         let caps = Capabilities::from_state(&s);
         let c = caps
-            .axis(ContinuousKind::Temperature)
+            .axis(AxisKind::Temperature)
             .expect("target temperature supported");
 
         assert_eq!((c.min, c.max, c.step), (10.0, 28.0, 0.5));
@@ -656,18 +690,14 @@ mod tests {
     #[test]
     fn climate_without_target_temperature_feature_has_no_control() {
         let s = state("climate.hall", json!({ "supported_features": 0 }));
-        assert!(Capabilities::from_state(&s).continuous.is_empty());
+        assert!(Capabilities::from_state(&s).controls.is_empty());
     }
 
     #[test]
     fn cover_needs_set_position_feature() {
         // OPEN|CLOSE|STOP but no SET_POSITION (4).
         let positionless = state("cover.garage", json!({ "supported_features": 11 }));
-        assert!(
-            Capabilities::from_state(&positionless)
-                .continuous
-                .is_empty()
-        );
+        assert!(Capabilities::from_state(&positionless).controls.is_empty());
 
         let positionable = state(
             "cover.blinds",
@@ -675,7 +705,7 @@ mod tests {
         );
         let caps = Capabilities::from_state(&positionable);
         let c = caps
-            .axis(ContinuousKind::Position)
+            .axis(AxisKind::Position)
             .expect("SET_POSITION means a position axis");
         assert_eq!(c.current, Some(40.0));
     }
@@ -690,9 +720,9 @@ mod tests {
     }
 
     #[test]
-    fn continuous_control_clamps_before_building_an_action() {
-        let c = ContinuousControl {
-            kind: ContinuousKind::Brightness,
+    fn an_axis_clamps_before_building_an_action() {
+        let c = Axis {
+            kind: AxisKind::Brightness,
             min: 0.0,
             max: 255.0,
             step: 1.0,

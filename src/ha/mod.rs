@@ -9,7 +9,7 @@ pub mod ws;
 
 use std::collections::HashMap;
 
-pub use actions::{ActionKind, Capabilities, ContinuousControl, ContinuousKind};
+pub use actions::{ActionKind, Axis, AxisKind, Capabilities, Control};
 pub use types::{EntityState, HaConnectionConfig, HaEvent};
 
 /// Runtime state for the HA integration. Owned by `Snapdash` as a single

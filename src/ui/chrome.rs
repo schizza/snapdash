@@ -26,17 +26,20 @@ pub fn window_content<'a>(
                 settings: app.config.widget_settings,
                 priority: app.config.priority(entity_id),
                 title: app.display_name(entity_id),
-                axes: app
+                controls: app
                     .ha
                     .entities
                     .get(entity_id)
                     .map(crate::ha::Capabilities::from_state)
-                    .map(|caps| caps.continuous)
+                    .map(|caps| caps.controls)
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|control| {
-                        let pending = app.pending.shown(entity_id, control.kind);
-                        (control, pending)
+                    .map(|control| crate::ui::entity_window::ControlView {
+                        pending: control
+                            .axes()
+                            .map(|axis| app.pending.shown(entity_id, axis.kind))
+                            .collect(),
+                        control,
                     })
                     .collect(),
             })

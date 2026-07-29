@@ -153,7 +153,7 @@ pub enum Message {
     /// only if the entity's throttle window has elapsed.
     ControlValueChanged {
         entity_id: String,
-        axis: ha::ContinuousKind,
+        axis: ha::AxisKind,
         value: f32,
     },
     /// Slider released. Always flushes the final value so an interaction
@@ -161,7 +161,7 @@ pub enum Message {
     /// settle window.
     ControlReleased {
         entity_id: String,
-        axis: ha::ContinuousKind,
+        axis: ha::AxisKind,
     },
     /// Ticks only while a pending value is outstanding, to retire the
     /// ones whose settle window ran out without a matching echo.
@@ -409,11 +409,10 @@ impl Snapdash {
     /// each can be compared against what we last sent for it. An axis HA
     /// is not currently reporting comes back as `None`, which never
     /// counts as confirmation.
-    fn echoed_values(state: &EntityState) -> Vec<(ha::ContinuousKind, Option<f32>)> {
+    fn echoed_values(state: &EntityState) -> Vec<(ha::AxisKind, Option<f32>)> {
         ha::Capabilities::from_state(state)
-            .continuous
-            .into_iter()
-            .map(|control| (control.kind, control.current))
+            .axes()
+            .map(|axis| (axis.kind, axis.current))
             .collect()
     }
 
@@ -503,34 +502,36 @@ impl Snapdash {
         }
     }
 
-    /// Every axis an entity currently exposes, in display order.
-    fn controls_for(&self, entity_id: &str) -> Vec<ha::ContinuousControl> {
+    /// Every control an entity currently offers, in display order.
+    fn controls_for(&self, entity_id: &str) -> Vec<ha::Control> {
         self.ha
             .entities
             .get(entity_id)
             .map(ha::Capabilities::from_state)
-            .map(|caps| caps.continuous)
+            .map(|caps| caps.controls)
             .unwrap_or_default()
     }
 
     /// Turn a raw slider value into the right service call for that axis,
     /// then dispatch it.
-    fn send_continuous(
+    fn send_axis(
         &self,
         entity_id: &str,
-        axis: ha::ContinuousKind,
+        kind: ha::AxisKind,
         value: f32,
         connection: HaConnectionConfig,
     ) -> Task<Message> {
-        let Some(control) = self
+        let Some(axis) = self
             .controls_for(entity_id)
-            .into_iter()
-            .find(|c| c.kind == axis)
+            .iter()
+            .flat_map(ha::Control::axes)
+            .find(|a| a.kind == kind)
+            .cloned()
         else {
             return Task::none();
         };
 
-        self.dispatch_action(entity_id.to_owned(), control.action(value), connection)
+        self.dispatch_action(entity_id.to_owned(), axis.action(value), connection)
     }
 
     /// Put an expanded widget back at its preset size and, when it had
@@ -1674,14 +1675,14 @@ impl Snapdash {
                     return Task::none();
                 };
                 // Nothing to reveal means nothing to grow into.
-                let axes = self.controls_for(&entity_id).len();
-                if axes == 0 {
+                let controls = self.controls_for(&entity_id);
+                if controls.is_empty() {
                     return Task::none();
                 }
 
                 let size = self.config.widget_settings.widget_size;
                 let base = size.window_size();
-                let grown_by = size.controls_height(axes);
+                let grown_by = size.controls_height(&controls);
 
                 // Without a reported position there is no way to tell
                 // whether the widget is near an edge, so it grows
@@ -1736,7 +1737,7 @@ impl Snapdash {
                     return Task::none();
                 };
 
-                self.send_continuous(&entity_id, axis, value, connection)
+                self.send_axis(&entity_id, axis, value, connection)
             }
 
             Message::ControlReleased { entity_id, axis } => {
@@ -1757,7 +1758,7 @@ impl Snapdash {
                     return Task::none();
                 };
 
-                self.send_continuous(&entity_id, axis, value, connection)
+                self.send_axis(&entity_id, axis, value, connection)
             }
 
             Message::PendingTick(now) => {

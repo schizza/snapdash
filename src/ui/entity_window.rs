@@ -3,7 +3,7 @@ use iced::{Alignment, Element, Length};
 
 use super::components;
 use crate::app::{EntityWindowState, Message};
-use crate::ha::{ActionKind, ContinuousControl, ContinuousKind};
+use crate::ha::{ActionKind, Axis, AxisKind, Control};
 use crate::theme::{Palette, metric};
 use crate::ui::components::IconVisual;
 use crate::ui::format::format_entity_value;
@@ -100,17 +100,17 @@ fn confirm_prompt<'a>(entity_id: &str, font: f32, gap: f32, p: Palette) -> Eleme
 /// those units, so it reads as a percentage. Position is already a
 /// percentage. A setpoint keeps its own scale, and its step decides
 /// whether a decimal is worth showing.
-fn readout(control: &ContinuousControl, value: f32) -> String {
+fn readout(control: &Axis, value: f32) -> String {
     match control.kind {
-        ContinuousKind::Brightness => {
+        AxisKind::Brightness => {
             let pct = (value / control.max * 100.0).round();
             format!("{pct:.0}%")
         }
         // Kelvin is the unit users actually see on a bulb's box, so it
         // is shown as-is rather than rescaled to a percentage.
-        ContinuousKind::ColorTemp => format!("{:.0}K", value.round()),
-        ContinuousKind::Position => format!("{:.0}%", value.round()),
-        ContinuousKind::Temperature => {
+        AxisKind::ColorTemp => format!("{:.0}K", value.round()),
+        AxisKind::Position => format!("{:.0}%", value.round()),
+        AxisKind::Temperature => {
             if control.step < 1.0 {
                 format!("{value:.1}°")
             } else {
@@ -120,12 +120,27 @@ fn readout(control: &ContinuousControl, value: f32) -> String {
     }
 }
 
-fn axis_label(kind: ContinuousKind) -> &'static str {
+fn axis_label(kind: AxisKind) -> &'static str {
     match kind {
-        ContinuousKind::Brightness => "Brightness",
-        ContinuousKind::ColorTemp => "White",
-        ContinuousKind::Temperature => "Target",
-        ContinuousKind::Position => "Position",
+        AxisKind::Brightness => "Brightness",
+        AxisKind::ColorTemp => "White",
+        AxisKind::Temperature => "Target",
+        AxisKind::Position => "Position",
+    }
+}
+
+/// One control inside an expanded widget.
+///
+/// The dispatch that turns a [`Control`] into its own layout. Each
+/// variant draws itself; this is the only place that decides which.
+fn control_block<'a>(
+    entity_id: &str,
+    view: &ControlView,
+    font: f32,
+    p: Palette,
+) -> Element<'a, Message> {
+    match &view.control {
+        Control::Value(axis) => control_row(entity_id, axis, view.pending(0), font, p),
     }
 }
 
@@ -139,7 +154,7 @@ fn axis_label(kind: ContinuousKind) -> &'static str {
 /// brightness. See `crate::app::pending`.
 fn control_row<'a>(
     entity_id: &str,
-    control: &ContinuousControl,
+    control: &Axis,
     pending: Option<f32>,
     font: f32,
     p: Palette,
@@ -216,11 +231,26 @@ pub struct WidgetView<'a> {
     pub settings: crate::config::WidgetSettings,
     pub priority: Priority,
     pub title: String,
-    /// Every axis this entity exposes, each paired with the locally-held
-    /// value if the user is currently driving it. A pending value wins
-    /// over whatever HA last reported. A non-empty list is what earns
-    /// the widget its expand chevron.
-    pub axes: Vec<(ContinuousControl, Option<f32>)>,
+    /// Every control this entity offers, in display order. A non-empty
+    /// list is what earns the widget its expand chevron.
+    pub controls: Vec<ControlView>,
+}
+
+/// One control together with the locally-held value of each axis it
+/// drives, in the same order as [`Control::axes`].
+///
+/// A pending value wins over whatever HA last reported, for as long as
+/// the user is driving that axis (`crate::app::pending`).
+pub struct ControlView {
+    pub control: Control,
+    pub pending: Vec<Option<f32>>,
+}
+
+impl ControlView {
+    /// The pending value of the `n`th axis this control drives.
+    fn pending(&self, index: usize) -> Option<f32> {
+        self.pending.get(index).copied().flatten()
+    }
 }
 
 pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
@@ -232,7 +262,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
         settings: widget_settings,
         priority,
         title,
-        axes,
+        controls,
     } = ctx;
 
     let (_friendly, main_opt, detail) = format_main_value(state);
@@ -318,7 +348,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
     // does something, and the chevron the signal that it has a value
     // worth adjusting. Gated on `connected` for the same reason the
     // action is, a control that cannot reach HA would swallow drags.
-    if !axes.is_empty() && connected {
+    if !controls.is_empty() && connected {
         let (icon, tooltip) = if state.is_expanded() {
             (Icon::ChevronUp, "Hide controls")
         } else {
@@ -445,13 +475,12 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
         // window of their own, so they cannot drift away from the value
         // they belong to (#87).
         if state.is_expanded() {
-            for (control, pending) in &axes {
+            for view in &controls {
                 inner_column = inner_column
                     .push(space().height(widget_settings.widget_size.value_detail_gap()));
-                inner_column = inner_column.push(control_row(
+                inner_column = inner_column.push(control_block(
                     &state.entity_id,
-                    control,
-                    *pending,
+                    view,
                     widget_settings.widget_size.detail_font(),
                     p,
                 ));

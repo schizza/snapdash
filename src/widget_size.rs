@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ha::Control;
 use crate::helpers;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,7 +148,7 @@ impl WidgetSize {
         }
     }
 
-    /// Height one continuous control adds to an expanded widget (#87):
+    /// Height a single-axis control adds to an expanded widget (#87):
     /// a label with its readout, and the slider under it.
     pub fn control_row_height(self) -> f32 {
         match self {
@@ -157,16 +158,31 @@ impl WidgetSize {
         }
     }
 
-    /// Total height the controls area adds for `axes` controls, or `0.0`
-    /// when the entity has none to show.
+    /// Height one control adds, its own separating gap included.
     ///
-    /// Every row is preceded by its own separating gap, which is how
-    /// `entity_window` builds them: an entity with two axes gets two
+    /// Every control is preceded by its own gap, which is how
+    /// `entity_window` builds them: an entity with two controls gets two
     /// gaps, not one. Counting a single gap for the whole block left the
-    /// window short by one gap per extra axis, which the last row paid
-    /// for out of its own slack.
-    pub fn controls_height(self, axes: usize) -> f32 {
-        (self.value_detail_gap() + self.control_row_height()) * axes as f32
+    /// window short by one gap per extra control, which the last row
+    /// paid for out of its own slack.
+    pub fn control_height(self, control: &Control) -> f32 {
+        let body = match control {
+            Control::Value(_) => self.control_row_height(),
+        };
+
+        self.value_detail_gap() + body
+    }
+
+    /// Total height the controls area adds, or `0.0` when the entity has
+    /// none to show.
+    ///
+    /// A sum rather than a multiplication, because controls are not all
+    /// the same height: a colour surface is a field, not a slider.
+    pub fn controls_height(self, controls: &[Control]) -> f32 {
+        controls
+            .iter()
+            .map(|control| self.control_height(control))
+            .sum()
     }
 }
 
