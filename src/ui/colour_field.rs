@@ -55,6 +55,31 @@ use iced::{Color, Element, Length, Point, Radians, Rectangle, Size, border, mous
 
 use crate::ui::colour_texture::{self, MAX_HUE, MAX_SATURATION};
 
+/// The precision shortcuts, in the words the field is advertised by.
+///
+/// Shift, Alt and the wheel are invisible unless something says they
+/// exist, so `ui::entity_window` hangs this off a help icon in the
+/// colour control's own label row (#100). It lives here, beside
+/// [`constrained`] and [`nudged`], because it is a statement about what
+/// they do: a wording that drifts from them is a lie the user is told at
+/// the exact moment they went looking for the truth.
+///
+/// Four short lines rather than four sentences. The tooltip is bounded
+/// by the widget's own window, which is 160 points wide at Small and
+/// leaves about 126 for text, and every line here fits inside that at
+/// the size `components::tooltip_message` draws them. The precise
+/// statements - *which* axis Shift holds, how much finer Alt is - are
+/// the README's job, because a tooltip is read in the second before a
+/// gesture and not studied.
+///
+/// The saturation magnets are deliberately absent. They need no holding
+/// down and no discovering: they happen on their own, at the two ends of
+/// an axis the user was already dragging towards.
+pub const SHORTCUTS: &str = "Shift holds an axis\n\
+                             Alt drags finer\n\
+                             Wheel nudges hue\n\
+                             With Shift, saturation";
+
 /// The colour under a pointer, given where the field is and where the
 /// gesture started.
 ///

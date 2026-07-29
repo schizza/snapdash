@@ -35,6 +35,15 @@ pub enum Icon {
     ChevronDown,
     /// Collapses an expanded widget back to its size preset.
     ChevronUp,
+    /// A question mark in a circle, sitting beside a control that
+    /// answers modifier keys and the wheel (#100).
+    ///
+    /// Lucide's `circle-help` rather than `info`, because the question
+    /// it answers is "what else can I do here?" rather than anything
+    /// about the state of the house, and rather than [`Icon::Unknown`],
+    /// which is `badge-help` and already means "nothing is known about
+    /// this" wherever it appears.
+    Help,
 }
 
 impl Icon {
@@ -57,6 +66,7 @@ impl Icon {
             Self::Play => '\u{e13c}',        // play
             Self::ChevronDown => '\u{e06d}', // chevron-down
             Self::ChevronUp => '\u{e070}',   // chevron-up
+            Self::Help => '\u{e082}',        // circle-help
         }
     }
 

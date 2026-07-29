@@ -7,14 +7,21 @@ mod harness;
 use serde_json::json;
 use snapdash::app::Message;
 use snapdash::ha::AxisKind;
+use snapdash::ui::entity_window::shortcut_hint;
 
-use harness::{Harness, light_off_attributes, light_on_attributes, rgb_light_attributes};
+use harness::{
+    Harness, dimmable_light_attributes, light_off_attributes, light_on_attributes,
+    rgb_light_attributes,
+};
 
 const ENTITY: &str = "light.living_room";
 /// A second light, whose only colour mode is `rgb`. Colour reaches this
 /// one through an 8-bit conversion in both directions, which is the
 /// round trip the hue tolerance has to survive.
 const RGB_ENTITY: &str = "light.desk_lamp";
+/// A third light that can only be dimmed, and so has no colour surface
+/// and none of the gestures that go with one.
+const DIMMABLE_ENTITY: &str = "light.hallway";
 
 /// What the control driving `kind` currently shows, found by axis rather
 /// than by position so a test never encodes the order the entity happens
@@ -399,30 +406,81 @@ async fn dragging_the_colour_field_on_a_light_that_is_off_turns_it_on() {
 async fn a_light_with_no_colour_mode_offers_no_colour_surface() {
     let mut harness = Harness::new().await;
     harness
-        .state_changed(
-            "light.hallway",
-            "on",
-            json!({
-                "supported_color_modes": ["brightness"],
-                "color_mode": "brightness",
-                "brightness": 128,
-                "friendly_name": "Hallway",
-                "supported_features": 0
-            }),
-        )
+        .state_changed(DIMMABLE_ENTITY, "on", dimmable_light_attributes())
         .await;
 
-    let controls = harness.app.control_views("light.hallway");
+    let controls = harness.app.control_views(DIMMABLE_ENTITY);
 
     assert_eq!(controls.len(), 1, "brightness alone");
     assert_eq!(
-        axis_value(&harness, "light.hallway", AxisKind::Hue),
+        axis_value(&harness, DIMMABLE_ENTITY, AxisKind::Hue),
         None,
         "no hue axis exists to have a value"
     );
     assert_eq!(
-        axis_value(&harness, "light.hallway", AxisKind::Saturation),
+        axis_value(&harness, DIMMABLE_ENTITY, AxisKind::Saturation),
         None
+    );
+}
+
+/// Shift, Alt and the wheel are invisible unless something says they
+/// exist, which is what the help affordance in the colour control's
+/// label row is for (#100).
+///
+/// It is asked for here rather than looked at, because a rendered
+/// `Element` cannot be read back: [`shortcut_hint`] is the one place
+/// deciding which controls get one, and the widget builds its label row
+/// from that answer.
+///
+/// The negative half is the half with teeth. A brightness slider is
+/// `iced::widget::slider`, which reads the pointer's horizontal offset
+/// and nothing else, so an icon there would promise help that holding
+/// Shift cannot give.
+#[tokio::test]
+async fn only_a_colour_control_offers_the_shortcut_help() {
+    let mut harness = Harness::new().await;
+    harness
+        .state_changed(ENTITY, "on", light_on_attributes())
+        .await;
+    harness
+        .state_changed(DIMMABLE_ENTITY, "on", dimmable_light_attributes())
+        .await;
+
+    let colour_bulb = harness.app.control_views(ENTITY);
+    let helped: Vec<_> = colour_bulb
+        .iter()
+        .filter(|view| shortcut_hint(&view.control).is_some())
+        .collect();
+
+    assert_eq!(
+        helped.len(),
+        1,
+        "one help affordance on a bulb offering brightness, white and colour"
+    );
+    assert!(
+        helped[0]
+            .control
+            .axes()
+            .any(|axis| axis.kind == AxisKind::Hue),
+        "and it is the colour surface that carries it"
+    );
+
+    let hint = shortcut_hint(&helped[0].control).expect("the colour control is the helped one");
+    for shortcut in ["Shift", "Alt", "Wheel"] {
+        assert!(
+            hint.contains(shortcut),
+            "the hint names {shortcut}, and says: {hint}"
+        );
+    }
+
+    let dimmable = harness.app.control_views(DIMMABLE_ENTITY);
+
+    assert_eq!(dimmable.len(), 1, "brightness alone");
+    assert!(
+        dimmable
+            .iter()
+            .all(|view| shortcut_hint(&view.control).is_none()),
+        "a light with no colour surface is promised no shortcuts"
     );
 }
 

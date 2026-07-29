@@ -179,6 +179,30 @@ pub fn rgb_light_attributes(rgb_color: [u8; 3], hs_color: [f64; 2], xy_color: [f
     })
 }
 
+/// What Home Assistant reports for a **dimmable white** light, on.
+///
+/// The one colour mode is `brightness`, which is how a light says it can
+/// be dimmed and nothing else. Note what that removes: no `hs_color`,
+/// `rgb_color` or `xy_color`, because Home Assistant only reports those
+/// for a light advertising a colour mode, and none of the mireds or
+/// kelvin keys, because it only reports those for one advertising
+/// `color_temp`. A blob that kept them at null would be describing a
+/// bulb that does not exist, and the absence is the whole point of this
+/// one: it is the entity that must *not* be offered a colour surface, or
+/// the shortcuts that go with it.
+///
+/// `supported_features` is 32 - transition, and no effects - which is
+/// why there is no `effect_list` either.
+pub fn dimmable_light_attributes() -> Value {
+    json!({
+        "supported_color_modes": ["brightness"],
+        "color_mode": "brightness",
+        "brightness": 128,
+        "friendly_name": "Hallway",
+        "supported_features": 32
+    })
+}
+
 /// The same bulb **on**, sitting in `color_temp` mode.
 pub fn light_on_attributes() -> Value {
     json!({

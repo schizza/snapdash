@@ -154,10 +154,33 @@ fn control_block<'a>(
     p: Palette,
 ) -> Element<'a, Message> {
     let font = size.detail_font();
+    let help = shortcut_hint(&view.control);
 
     match &view.control {
-        Control::Value(axis) => control_row(entity_id, axis, view.value(0), font, p),
-        Control::Color { .. } => colour_block(entity_id, view.value(0), view.value(1), size, p),
+        Control::Value(axis) => control_row(entity_id, axis, view.value(0), font, help, p),
+        Control::Color { .. } => {
+            colour_block(entity_id, view.value(0), view.value(1), help, size, p)
+        }
+    }
+}
+
+/// What a control's precision shortcuts are, or `None` for a control
+/// that has none.
+///
+/// The one place that decides where the help affordance appears, rather
+/// than each block deciding for itself (#100). Only the colour surface
+/// implements the shortcuts: `iced::widget::slider` reads the pointer's
+/// horizontal offset and nothing else, so the same icon over a
+/// brightness rail would promise help that pressing Shift cannot give.
+///
+/// Answering with the words instead of a `bool` is what keeps the two
+/// facts together. A control that grows shortcuts of its own says so
+/// here and describes them in its own module, and the label row picks
+/// them up without being touched.
+pub fn shortcut_hint(control: &Control) -> Option<&'static str> {
+    match control {
+        Control::Value(_) => None,
+        Control::Color { .. } => Some(colour_field::SHORTCUTS),
     }
 }
 
@@ -207,6 +230,7 @@ fn control_row<'a>(
     control: &Axis,
     value: Option<f32>,
     font: f32,
+    help: Option<&'static str>,
     p: Palette,
 ) -> Element<'a, Message> {
     let absent = value.is_none();
@@ -221,6 +245,7 @@ fn control_row<'a>(
         value.map(|value| readout(control, value)),
         font,
         opacity,
+        help,
         p,
     );
 
@@ -266,11 +291,16 @@ fn control_row<'a>(
 /// "the value, or a dash when there is none" is stated once. The dash is
 /// what an absent axis reads as: a readout is a statement about the
 /// device, and an axis the device is not driving has nothing to state.
+///
+/// `help` is the control's precision shortcuts, from [`shortcut_hint`],
+/// and where there are any the line ends with an icon that names them on
+/// hover (#100).
 fn control_header<'a>(
     label: &'static str,
     value: Option<String>,
     font: f32,
     opacity: f32,
+    help: Option<&'static str>,
     p: Palette,
 ) -> Element<'a, Message> {
     let label_color = fade(p.text_dim, opacity);
@@ -288,9 +318,53 @@ fn control_header<'a>(
             color: Some(value_color),
         });
 
-    row![label, space().width(Length::Fill), value]
-        .align_y(Alignment::Center)
-        .into()
+    let mut line = row![label, space().width(Length::Fill), value].align_y(Alignment::Center);
+
+    if let Some(hint) = help {
+        line = line
+            .push(space().width(HELP_GAP))
+            .push(help_icon(hint, font, opacity, p));
+    }
+
+    line.into()
+}
+
+/// How far the help icon stands off the readout.
+///
+/// Enough that "85%" and the circle do not read as one glyph, and no
+/// more: at Small the line is 132 points wide and the label, the widest
+/// readout and the icon already claim about 100 of them.
+const HELP_GAP: f32 = 4.0;
+
+/// The affordance that says the precision shortcuts exist.
+///
+/// Hover and nothing else. It fires no message, so a press over it falls
+/// through to the card underneath and still drags the widget, which is
+/// what keeps it from becoming a hole in the drag surface
+/// (`docs/adr/0001-widget-interaction-model.md`).
+///
+/// That ADR also keeps hover chrome off an expanded card, because every
+/// pixel the card grew by is a control and an overlay pinned to its
+/// edges swallows the press underneath. This is not that: it sits inside
+/// the control's own layout rather than over a track, it takes its space
+/// from the line it is part of rather than from anything draggable, and
+/// the panel it opens is only up while the pointer is on the icon - so
+/// it is never between the user and a gesture.
+///
+/// Drawn at the label's own size. The glyph fills its em box where the
+/// text only fills its cap height, so at equal nominal sizes the icon
+/// already reads a little larger than the words beside it, and asking
+/// for more would make the help louder than the readout it follows.
+fn help_icon<'a>(hint: &'static str, font: f32, opacity: f32, p: Palette) -> Element<'a, Message> {
+    iced::widget::tooltip(
+        Icon::Help
+            .text(p)
+            .size(font)
+            .color(fade(p.text_dim, opacity)),
+        components::tooltip_message(hint, crate::ui::theme::MessageType::Info, p),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .into()
 }
 
 /// The colour surface inside an expanded widget: a label with its
@@ -315,6 +389,7 @@ fn colour_block<'a>(
     entity_id: &str,
     hue: Option<f32>,
     saturation: Option<f32>,
+    help: Option<&'static str>,
     size: WidgetSize,
     p: Palette,
 ) -> Element<'a, Message> {
@@ -359,7 +434,7 @@ fn colour_block<'a>(
     );
 
     column![
-        control_header("Colour", readout, size.detail_font(), opacity, p),
+        control_header("Colour", readout, size.detail_font(), opacity, help, p),
         field,
     ]
     .spacing(4)
