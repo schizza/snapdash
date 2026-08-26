@@ -1,5 +1,5 @@
 //! Pending values: the local override that wins over Home Assistant
-//! truth while the user is driving a continuous control.
+//! truth while the user is driving a control.
 //!
 //! Sends are throttled during a drag, so HA keeps broadcasting
 //! `state_changed` with values that lag the user's finger. Binding a
@@ -16,6 +16,18 @@
 //! authoritative forever and the widget would quietly lie about the
 //! state of the house.
 //!
+//! How an echo is recognised is not this module's business at all. A
+//! value that passes through a unit conversion on the way back does not
+//! return the number we sent, and how much it loses is a fact about that
+//! conversion, not about floats - and for a colour it is not even a
+//! per-axis fact, because confirming a colour means comparing two
+//! colours rather than two pairs of coordinates. So an echo arrives here
+//! as the [`Control`]s Home Assistant just reported, and each control is
+//! asked whether it recognises its own ([`Control::reconciles`]). A
+//! control that says yes releases every axis it drives; one that says no
+//! releases none of them, because half a confirmed colour is not a
+//! thing. Recorded in `docs/adr/0004-controls-and-axes.md`.
+//!
 //! State is kept **per axis**, so brightness and colour temperature
 //! reconcile independently and neither overwrites the other. Throttling
 //! is kept **per entity**, so a light with two sliders still peaks at
@@ -23,12 +35,21 @@
 //! the arithmetic in `docs/adr/0003-service-calls-stay-on-rest.md` valid
 //! as axes are added.
 //!
+//! Because of that split, the unit both [`PendingValues::set`] and
+//! [`PendingValues::release`] take is the **gesture**: a batch of axes,
+//! never a single one. One gesture spends one throttle window, so the
+//! window has to be consulted once for everything it moved. A per-axis
+//! entry point would have let a caller spend it on the first axis and
+//! silently record nothing sent for the rest, which is a bug the type
+//! system could not catch and only shows up as an axis that never
+//! reconciles. There is one way in so the two cannot drift apart.
+//!
 //! Recorded in `docs/adr/0002-pending-values-and-settle-window.md`.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::ha::ContinuousKind;
+use crate::ha::{AxisKind, Control, Outstanding};
 
 /// Minimum gap between service calls for one entity while it is being
 /// driven. Caps the send rate at ~5/sec, which is what keeps REST viable
@@ -38,11 +59,6 @@ pub const SEND_INTERVAL: Duration = Duration::from_millis(200);
 /// How long a released value stays authoritative while waiting for a
 /// matching echo before HA truth is allowed to win again.
 pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// Echoes are compared to the last sent value with a tolerance, because
-/// a setpoint round-trips through HA as a float and may come back with
-/// a different representation than we sent.
-const EPSILON: f32 = 0.01;
 
 /// One axis's in-flight interaction.
 #[derive(Debug, Clone)]
@@ -73,13 +89,6 @@ impl Pending {
         self.settle_deadline = None;
     }
 
-    /// `true` when this echo is the one we were waiting for, meaning the
-    /// axis can go back to being driven by HA.
-    fn reconciles(&self, echoed: f32) -> bool {
-        self.last_sent
-            .is_some_and(|sent| (sent - echoed).abs() <= EPSILON)
-    }
-
     /// `true` once the settle window has run out. Never true while the
     /// user still holds the control.
     fn expired(&self, now: Instant) -> bool {
@@ -87,7 +96,7 @@ impl Pending {
     }
 }
 
-type AxisKey = (String, ContinuousKind);
+type AxisKey = (String, AxisKind);
 
 /// All in-flight interactions.
 #[derive(Debug, Default)]
@@ -102,7 +111,7 @@ pub struct PendingValues {
 impl PendingValues {
     /// The locally-held value for one axis, if it currently has one.
     /// Callers render this in preference to the HA state.
-    pub fn shown(&self, entity_id: &str, kind: ContinuousKind) -> Option<f32> {
+    pub fn shown(&self, entity_id: &str, kind: AxisKind) -> Option<f32> {
         self.axes
             .get(&(entity_id.to_owned(), kind))
             .map(|pending| pending.shown)
@@ -120,65 +129,126 @@ impl PendingValues {
         }
     }
 
-    /// Record a new value for one axis. Returns `Some(value)` when a send
-    /// is due now, `None` when the entity's throttle window swallows it.
+    /// Record the new values one gesture produced, and say whether they
+    /// are due to go out now. `false` means the entity's throttle window
+    /// swallowed this batch.
     ///
-    /// A swallowed value is not lost: it stays in `shown`, and
-    /// [`Self::release`] always flushes the final one.
-    pub fn set(
-        &mut self,
-        entity_id: &str,
-        kind: ContinuousKind,
-        value: f32,
-        now: Instant,
-    ) -> Option<f32> {
+    /// Nothing is returned but the verdict, because the caller is holding
+    /// the values it just passed in.
+    ///
+    /// A swallowed batch is not lost: every value stays in `shown`, and
+    /// [`Self::release`] flushes the final ones.
+    pub fn set(&mut self, entity_id: &str, updates: &[(AxisKind, f32)], now: Instant) -> bool {
+        if updates.is_empty() {
+            return false;
+        }
+
+        // Asked once, for the batch. The throttle window is spent by the
+        // gesture and not by the axis, so asking per axis would let the
+        // first one spend it and leave every other one recording nothing
+        // but `shown`. Those axes would have no `last_sent` to recognise
+        // their echo against, would run to the settle timeout on every
+        // interaction, and - since an entity only goes back to being
+        // HA-driven when none of its axes are pending - would hold their
+        // siblings there too.
         let due = self.send_due(entity_id, now);
 
-        let pending = self
-            .axes
-            .entry((entity_id.to_owned(), kind))
-            .or_insert_with(|| Pending::new(value));
-        pending.update(value);
+        for (kind, value) in updates {
+            let pending = self
+                .axes
+                .entry((entity_id.to_owned(), *kind))
+                .or_insert_with(|| Pending::new(*value));
+            pending.update(*value);
 
-        if !due {
+            if due {
+                pending.last_sent = Some(*value);
+            }
+        }
+
+        if due {
+            self.last_send_at.insert(entity_id.to_owned(), now);
+        }
+
+        due
+    }
+
+    /// The user let go of the control. Always returns the final value of
+    /// every axis it was driving, so an interaction never ends on a
+    /// throttled-away intermediate, and starts the settle window on each.
+    ///
+    /// The values have to come back, unlike in [`Self::set`]: the last
+    /// one the caller saw may well have been swallowed by the throttle,
+    /// so what the control is showing is not the caller's to know.
+    ///
+    /// `None` when this entity has nothing pending on any of these axes,
+    /// which is the case for a release that follows a reconciled echo.
+    pub fn release(
+        &mut self,
+        entity_id: &str,
+        axes: &[AxisKind],
+        now: Instant,
+    ) -> Option<Vec<(AxisKind, f32)>> {
+        let mut flushed = Vec::with_capacity(axes.len());
+
+        for kind in axes {
+            let Some(pending) = self.axes.get_mut(&(entity_id.to_owned(), *kind)) else {
+                continue;
+            };
+            let value = pending.shown;
+
+            pending.last_sent = Some(value);
+            pending.settle_deadline = Some(now + SETTLE_TIMEOUT);
+            flushed.push((*kind, value));
+        }
+
+        if flushed.is_empty() {
             return None;
         }
 
-        pending.last_sent = Some(value);
         self.last_send_at.insert(entity_id.to_owned(), now);
-        Some(value)
+        Some(flushed)
     }
 
-    /// The user released the control. Always returns the final value to
-    /// send, so an interaction never ends on a throttled-away
-    /// intermediate, and starts the settle window.
-    pub fn release(&mut self, entity_id: &str, kind: ContinuousKind, now: Instant) -> Option<f32> {
-        let pending = self.axes.get_mut(&(entity_id.to_owned(), kind))?;
-        let value = pending.shown;
-
-        pending.last_sent = Some(value);
-        pending.settle_deadline = Some(now + SETTLE_TIMEOUT);
-        self.last_send_at.insert(entity_id.to_owned(), now);
-
-        Some(value)
-    }
-
-    /// Feed in the values an entity's `state_changed` carries, one per
-    /// axis it reports.
+    /// Feed in an entity's `state_changed`, as the controls it reports.
+    ///
+    /// The echo arrives as controls rather than as loose axis/value pairs
+    /// because recognising an echo is the control's own job, and for a
+    /// colour it is a judgement over both of its axes at once. Each
+    /// control carries the echoed value of every axis it drives, in
+    /// [`Axis::current`], so it has everything it needs to answer.
+    ///
+    /// A control that recognises its echo releases every axis it drives;
+    /// one that does not releases none of them.
     ///
     /// Returns `true` when the entity is HA-driven again, meaning no axis
     /// of it is still waiting. `false` means the caller must keep
     /// rendering the pending values and ignore this echo, because
-    /// applying it would drag a slider back under the user's finger.
-    pub fn reconcile(&mut self, entity_id: &str, echoed: &[(ContinuousKind, Option<f32>)]) -> bool {
-        for (kind, value) in echoed {
-            let key = (entity_id.to_owned(), *kind);
-            let Some(pending) = self.axes.get(&key) else {
-                continue;
-            };
+    /// applying it would drag a control back under the user's finger.
+    ///
+    /// [`Axis::current`]: crate::ha::Axis::current
+    pub fn reconcile(&mut self, entity_id: &str, echoed: &[Control]) -> bool {
+        for control in echoed {
+            let axes = &self.axes;
+            let confirmed = control.reconciles(|kind| {
+                // Three states, not two. An axis whose sends the entity's
+                // throttle has so far swallowed is holding a gesture in
+                // progress with nothing on the wire, and answering `None`
+                // for it - as for an axis with no interaction at all -
+                // would have this echo vacuously confirm it and release
+                // the value out from under the user's finger.
+                match axes.get(&(entity_id.to_owned(), kind)) {
+                    None => Outstanding::Nothing,
+                    Some(pending) => match pending.last_sent {
+                        None => Outstanding::Unsent,
+                        Some(sent) => Outstanding::Sent(sent),
+                    },
+                }
+            });
 
-            if value.is_some_and(|value| pending.reconciles(value)) {
-                self.axes.remove(&key);
+            if confirmed {
+                for axis in control.axes() {
+                    self.axes.remove(&(entity_id.to_owned(), axis.kind));
+                }
             }
         }
 
@@ -238,17 +308,47 @@ impl PendingValues {
 mod tests {
     use super::*;
 
-    const BRIGHTNESS: ContinuousKind = ContinuousKind::Brightness;
-    const TEMP: ContinuousKind = ContinuousKind::ColorTemp;
+    use crate::ha::Axis;
+
+    const BRIGHTNESS: AxisKind = AxisKind::Brightness;
+    const TEMP: AxisKind = AxisKind::ColorTemp;
+    const HUE: AxisKind = AxisKind::Hue;
+    const SATURATION: AxisKind = AxisKind::Saturation;
 
     fn t0() -> Instant {
         Instant::now()
     }
 
+    /// An axis carrying an echoed value. The range is filler: recognising
+    /// an echo consults the kind and the value and nothing else.
+    fn axis(kind: AxisKind, echoed: Option<f32>) -> Axis {
+        Axis {
+            kind,
+            min: 0.0,
+            max: 255.0,
+            step: 1.0,
+            current: echoed,
+        }
+    }
+
+    /// One scalar control as Home Assistant has just reported it.
+    fn echo(kind: AxisKind, value: Option<f32>) -> Control {
+        Control::Value(axis(kind, value))
+    }
+
+    /// A colour surface as Home Assistant has just reported it.
+    fn colour_echo(hue: Option<f32>, saturation: Option<f32>) -> Control {
+        Control::Color {
+            hue: axis(HUE, hue),
+            saturation: axis(SATURATION, saturation),
+        }
+    }
+
     #[test]
     fn first_value_sends_immediately() {
         let mut p = PendingValues::default();
-        assert_eq!(p.set("light.a", BRIGHTNESS, 100.0, t0()), Some(100.0));
+        assert!(p.set("light.a", &[(BRIGHTNESS, 100.0)], t0()));
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0));
     }
 
     #[test]
@@ -256,34 +356,24 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        assert_eq!(p.set("light.a", BRIGHTNESS, 100.0, now), Some(100.0));
+        assert!(p.set("light.a", &[(BRIGHTNESS, 100.0)], now));
         // Still inside SEND_INTERVAL, so no wire traffic...
-        assert_eq!(
-            p.set(
-                "light.a",
-                BRIGHTNESS,
-                120.0,
-                now + Duration::from_millis(50)
-            ),
-            None
-        );
-        assert_eq!(
-            p.set(
-                "light.a",
-                BRIGHTNESS,
-                140.0,
-                now + Duration::from_millis(100)
-            ),
-            None
-        );
+        assert!(!p.set(
+            "light.a",
+            &[(BRIGHTNESS, 120.0)],
+            now + Duration::from_millis(50)
+        ));
+        assert!(!p.set(
+            "light.a",
+            &[(BRIGHTNESS, 140.0)],
+            now + Duration::from_millis(100)
+        ));
         // ...but the value is not lost, the control still shows it.
         assert_eq!(p.shown("light.a", BRIGHTNESS), Some(140.0));
 
         // Past the window, the next move goes out.
-        assert_eq!(
-            p.set("light.a", BRIGHTNESS, 160.0, now + SEND_INTERVAL),
-            Some(160.0)
-        );
+        assert!(p.set("light.a", &[(BRIGHTNESS, 160.0)], now + SEND_INTERVAL));
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(160.0));
     }
 
     /// The throttle is per entity, not per axis. Two sliders on one light
@@ -294,18 +384,89 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        assert_eq!(p.set("light.a", BRIGHTNESS, 100.0, now), Some(100.0));
+        assert!(p.set("light.a", &[(BRIGHTNESS, 100.0)], now));
         // A different axis of the same light, immediately after.
-        assert_eq!(
-            p.set("light.a", TEMP, 3000.0, now + Duration::from_millis(10)),
-            None,
+        assert!(
+            !p.set(
+                "light.a",
+                &[(TEMP, 3000.0)],
+                now + Duration::from_millis(10)
+            ),
             "shares the entity's window"
         );
-        // A different entity is unaffected.
-        assert_eq!(
-            p.set("light.b", BRIGHTNESS, 50.0, now + Duration::from_millis(10)),
-            Some(50.0)
+        // And so does every axis added since: the window belongs to the
+        // light, so a bulb with a colour control does not send faster
+        // than one without.
+        assert!(
+            !p.set("light.a", &[(HUE, 200.0)], now + Duration::from_millis(20)),
+            "colour shares the same window as brightness"
         );
+        // A different entity is unaffected.
+        assert!(p.set(
+            "light.b",
+            &[(BRIGHTNESS, 50.0)],
+            now + Duration::from_millis(10)
+        ));
+    }
+
+    /// The bug this batch API exists to make unrepresentable. One gesture
+    /// spends one throttle window, so every axis it moved has to come out
+    /// of it able to recognise its own echo. Set once per axis instead and
+    /// the second axis records only what it shows: it never reconciles,
+    /// runs to the settle timeout every time, and holds the whole entity
+    /// - the first axis included - there with it.
+    #[test]
+    fn a_batch_that_goes_out_records_the_sent_value_on_every_axis() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        assert!(p.set("light.a", &[(BRIGHTNESS, 100.0), (TEMP, 3000.0)], now));
+
+        assert!(
+            p.reconcile(
+                "light.a",
+                &[echo(BRIGHTNESS, Some(100.0)), echo(TEMP, Some(3000.0))]
+            ),
+            "both axes must recognise the echo of what the batch sent"
+        );
+        assert!(p.is_empty());
+    }
+
+    /// A batch the window swallows is still what the controls show, all
+    /// of it: the axes of one gesture cannot be allowed to disagree about
+    /// where the user's finger is.
+    #[test]
+    fn a_throttled_batch_still_records_every_axis_as_shown() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        assert!(p.set("light.a", &[(BRIGHTNESS, 100.0), (TEMP, 3000.0)], now));
+        assert!(!p.set(
+            "light.a",
+            &[(BRIGHTNESS, 120.0), (TEMP, 4000.0)],
+            now + Duration::from_millis(50)
+        ));
+
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(120.0));
+        assert_eq!(p.shown("light.a", TEMP), Some(4000.0));
+    }
+
+    /// The window is consumed by the gesture, not by the axis. A batch of
+    /// two must leave the entity exactly as throttled as a batch of one,
+    /// or the peak call rate would grow with every axis a control gains
+    /// and ADR-0003's arithmetic would stop holding.
+    #[test]
+    fn a_batch_consults_the_throttle_once_however_many_axes_it_moves() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        assert!(p.set("light.a", &[(BRIGHTNESS, 100.0), (TEMP, 3000.0)], now));
+
+        assert!(
+            !p.send_due("light.a", now + SEND_INTERVAL - Duration::from_millis(1)),
+            "one batch, one window"
+        );
+        assert!(p.send_due("light.a", now + SEND_INTERVAL));
     }
 
     #[test]
@@ -313,23 +474,50 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
         // Throttled away.
-        assert_eq!(
-            p.set(
-                "light.a",
-                BRIGHTNESS,
-                250.0,
-                now + Duration::from_millis(10)
-            ),
-            None
-        );
+        assert!(!p.set(
+            "light.a",
+            &[(BRIGHTNESS, 250.0)],
+            now + Duration::from_millis(10)
+        ));
         // Release must still put 250 on the wire, or the light ends up
         // sitting at a value the user scrubbed past.
         assert_eq!(
-            p.release("light.a", BRIGHTNESS, now + Duration::from_millis(20)),
-            Some(250.0)
+            p.release("light.a", &[BRIGHTNESS], now + Duration::from_millis(20)),
+            Some(vec![(BRIGHTNESS, 250.0)])
         );
+    }
+
+    /// Release answers for the whole gesture, in the order it was asked,
+    /// so the caller can put every axis of it on the wire.
+    #[test]
+    fn release_flushes_every_axis_of_the_gesture() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", &[(BRIGHTNESS, 100.0), (TEMP, 3000.0)], now);
+
+        assert_eq!(
+            p.release("light.a", &[BRIGHTNESS, TEMP], now),
+            Some(vec![(BRIGHTNESS, 100.0), (TEMP, 3000.0)])
+        );
+    }
+
+    /// An axis with nothing pending has nothing to flush, and must not
+    /// invent a value for one that has.
+    #[test]
+    fn release_skips_axes_that_are_not_pending() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
+
+        assert_eq!(
+            p.release("light.a", &[BRIGHTNESS, TEMP], now),
+            Some(vec![(BRIGHTNESS, 100.0)])
+        );
+        assert_eq!(p.release("light.a", &[TEMP], now), None);
     }
 
     #[test]
@@ -337,15 +525,15 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
         assert!(
-            !p.reconcile("light.a", &[(BRIGHTNESS, Some(40.0))]),
+            !p.reconcile("light.a", &[echo(BRIGHTNESS, Some(40.0))]),
             "stale echo ignored"
         );
         assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0));
 
         assert!(
-            p.reconcile("light.a", &[(BRIGHTNESS, Some(100.0))]),
+            p.reconcile("light.a", &[echo(BRIGHTNESS, Some(100.0))]),
             "matching echo resolves"
         );
         assert_eq!(p.shown("light.a", BRIGHTNESS), None);
@@ -359,19 +547,19 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
-        p.set("light.a", TEMP, 3000.0, now + SEND_INTERVAL);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
+        p.set("light.a", &[(TEMP, 3000.0)], now + SEND_INTERVAL);
 
         let resolved = p.reconcile(
             "light.a",
-            &[(BRIGHTNESS, Some(100.0)), (TEMP, Some(2500.0))],
+            &[echo(BRIGHTNESS, Some(100.0)), echo(TEMP, Some(2500.0))],
         );
 
         assert!(!resolved, "colour temperature has not come back yet");
         assert_eq!(p.shown("light.a", BRIGHTNESS), None, "brightness resolved");
         assert_eq!(p.shown("light.a", TEMP), Some(3000.0), "still held");
 
-        assert!(p.reconcile("light.a", &[(TEMP, Some(3000.0))]));
+        assert!(p.reconcile("light.a", &[echo(TEMP, Some(3000.0))]));
         assert!(p.is_empty());
     }
 
@@ -385,27 +573,24 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        assert_eq!(p.set("light.a", BRIGHTNESS, 100.0, now), Some(100.0));
+        assert!(p.set("light.a", &[(BRIGHTNESS, 100.0)], now));
 
         // HA confirms almost immediately, so the axis is no longer waiting.
-        assert!(p.reconcile("light.a", &[(BRIGHTNESS, Some(100.0))]));
+        assert!(p.reconcile("light.a", &[echo(BRIGHTNESS, Some(100.0))]));
         assert!(p.is_empty());
 
         // The user has not let go, and the window has not elapsed.
-        assert_eq!(
-            p.set(
+        assert!(
+            !p.set(
                 "light.a",
-                BRIGHTNESS,
-                120.0,
+                &[(BRIGHTNESS, 120.0)],
                 now + Duration::from_millis(30)
             ),
-            None,
             "the echo must not have reopened the window"
         );
 
-        assert_eq!(
-            p.set("light.a", BRIGHTNESS, 140.0, now + SEND_INTERVAL),
-            Some(140.0),
+        assert!(
+            p.set("light.a", &[(BRIGHTNESS, 140.0)], now + SEND_INTERVAL),
             "and it still opens on time"
         );
     }
@@ -418,12 +603,12 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
-        p.release("light.a", BRIGHTNESS, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
+        p.release("light.a", &[BRIGHTNESS], now);
         assert_eq!(p.expire(now + SETTLE_TIMEOUT), vec!["light.a".to_owned()]);
         assert!(p.send_due("light.a", now + SETTLE_TIMEOUT));
 
-        p.set("light.b", BRIGHTNESS, 50.0, now);
+        p.set("light.b", &[(BRIGHTNESS, 50.0)], now);
         p.clear("light.b");
         assert!(p.send_due("light.b", now));
     }
@@ -433,15 +618,165 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("climate.a", ContinuousKind::Temperature, 21.5, now);
-        assert!(p.reconcile("climate.a", &[(ContinuousKind::Temperature, Some(21.502))]));
+        p.set("climate.a", &[(AxisKind::Temperature, 21.5)], now);
+        assert!(p.reconcile("climate.a", &[echo(AxisKind::Temperature, Some(21.502))]));
+    }
+
+    /// A light that stores mireds internally round-trips kelvin through
+    /// `round(1_000_000 / kelvin)` and back, so the echo is never the
+    /// number we sent. 6350 K comes back as 6369 K, the worst case over
+    /// the 50 K grid Snapdash sends. Against the old global 0.01 this
+    /// could not match at all, and the axis ran to the settle timeout on
+    /// every single interaction.
+    #[test]
+    fn colour_temperature_reconciles_across_the_mired_round_trip() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", &[(TEMP, 6350.0)], now);
+        assert!(p.reconcile("light.a", &[echo(TEMP, Some(6369.0))]));
+    }
+
+    /// The slack must stay under the 50 K step, or a stop could be
+    /// confirmed by its neighbour and the slider would silently accept
+    /// a value the user did not ask for.
+    #[test]
+    fn colour_temperature_does_not_reconcile_against_a_neighbouring_stop() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", &[(TEMP, 3000.0)], now);
+        assert!(!p.reconcile("light.a", &[echo(TEMP, Some(3050.0))]));
+        assert_eq!(p.shown("light.a", TEMP), Some(3000.0));
+    }
+
+    /// A colour is confirmed or held as one thing. The control says yes
+    /// and both of its axes go; it says no and both of them stay, because
+    /// a widget showing Home Assistant's hue over the user's saturation
+    /// would be showing a colour that exists nowhere.
+    ///
+    /// Hue 132 at full saturation is stored as `rgb(0, 255, 50)` by a
+    /// light of the older Home Assistant vintage and read back as
+    /// 131.765, which the control recognises because it compares the
+    /// bytes and not the degrees. What those bytes are, and why, is
+    /// [`Control::reconciles`]'s business and is tested there.
+    #[test]
+    fn a_colour_releases_both_of_its_axes_or_neither() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        assert!(p.set("light.a", &[(HUE, 132.0), (SATURATION, 100.0)], now));
+        assert!(p.reconcile("light.a", &[colour_echo(Some(131.765), Some(100.0))]));
+        assert!(p.is_empty(), "both axes went together");
+
+        // Past the throttle window, so this one really goes out and both
+        // axes have something outstanding to be disagreed with.
+        assert!(p.set(
+            "light.a",
+            &[(HUE, 132.0), (SATURATION, 100.0)],
+            now + SEND_INTERVAL
+        ));
+        assert!(!p.reconcile("light.a", &[colour_echo(Some(200.0), Some(100.0))]));
+        assert_eq!(p.shown("light.a", HUE), Some(132.0));
+        assert_eq!(
+            p.shown("light.a", SATURATION),
+            Some(100.0),
+            "and neither did"
+        );
+    }
+
+    /// A colour and a slider on the same light are still separate
+    /// interactions: one control confirming must not release the other's
+    /// axes, and must not hand the whole entity back while it waits.
+    #[test]
+    fn a_colour_confirming_leaves_a_slider_of_the_same_light_alone() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set(
+            "light.a",
+            &[(BRIGHTNESS, 100.0), (HUE, 132.0), (SATURATION, 100.0)],
+            now,
+        );
+
+        let resolved = p.reconcile(
+            "light.a",
+            &[
+                echo(BRIGHTNESS, Some(40.0)),
+                colour_echo(Some(131.765), Some(100.0)),
+            ],
+        );
+
+        assert!(!resolved, "brightness has not come back yet");
+        assert_eq!(p.shown("light.a", HUE), None, "the colour resolved");
+        assert_eq!(p.shown("light.a", SATURATION), None);
+        assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0), "still held");
+    }
+
+    /// A gesture that has not reached the wire yet is still a gesture.
+    ///
+    /// Grabbing a second control inside the entity's throttle window
+    /// creates axes with nothing sent, and the sibling's echo says
+    /// nothing about them. Reading that silence as confirmation would
+    /// release the axes mid-drag: the surface would jump back to Home
+    /// Assistant's colour under the user's finger, and the release would
+    /// then find nothing pending and never send what they chose.
+    #[test]
+    fn a_throttled_gesture_is_not_confirmed_by_a_siblings_echo() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        // Brightness goes out at once and spends the entity's window.
+        assert!(p.set("light.a", &[(BRIGHTNESS, 100.0)], now));
+
+        // Inside that window the user grabs the colour surface, so hue
+        // and saturation are held with nothing yet on the wire.
+        assert!(!p.set(
+            "light.a",
+            &[(HUE, 132.0), (SATURATION, 100.0)],
+            now + Duration::from_millis(50)
+        ));
+
+        // Brightness's echo arrives. It says nothing about the colour.
+        p.reconcile(
+            "light.a",
+            &[
+                echo(BRIGHTNESS, Some(100.0)),
+                colour_echo(Some(10.0), Some(20.0)),
+            ],
+        );
+
+        assert_eq!(
+            p.shown("light.a", HUE),
+            Some(132.0),
+            "the colour is still under the finger"
+        );
+        assert_eq!(p.shown("light.a", SATURATION), Some(100.0));
+
+        let flushed = p.release(
+            "light.a",
+            &[HUE, SATURATION],
+            now + Duration::from_millis(300),
+        );
+        assert_eq!(flushed, Some(vec![(HUE, 132.0), (SATURATION, 100.0)]));
+    }
+
+    /// The slack is colour temperature's, not everybody's. Brightness
+    /// makes the round trip untouched, so 100 is not 110.
+    #[test]
+    fn brightness_keeps_the_tight_tolerance() {
+        let now = t0();
+        let mut p = PendingValues::default();
+
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
+        assert!(!p.reconcile("light.a", &[echo(BRIGHTNESS, Some(110.0))]));
     }
 
     #[test]
     fn entities_without_a_pending_value_are_always_ha_driven() {
         let mut p = PendingValues::default();
         assert!(p.reconcile("sensor.temp", &[]));
-        assert!(p.reconcile("sensor.temp", &[(BRIGHTNESS, Some(12.0))]));
+        assert!(p.reconcile("sensor.temp", &[echo(BRIGHTNESS, Some(12.0))]));
     }
 
     #[test]
@@ -449,10 +784,10 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
         // A state_changed with no readable value for the axis must not be
         // mistaken for confirmation.
-        assert!(!p.reconcile("light.a", &[(BRIGHTNESS, None)]));
+        assert!(!p.reconcile("light.a", &[echo(BRIGHTNESS, None)]));
         assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0));
     }
 
@@ -461,7 +796,7 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
         // Long past the settle timeout, but the user has not let go.
         assert!(p.expire(now + SETTLE_TIMEOUT * 10).is_empty());
         assert_eq!(p.shown("light.a", BRIGHTNESS), Some(100.0));
@@ -475,11 +810,11 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
-        p.release("light.a", BRIGHTNESS, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
+        p.release("light.a", &[BRIGHTNESS], now);
         // Second entity grabbed later, so its window has not elapsed.
-        p.set("light.b", BRIGHTNESS, 50.0, now + SETTLE_TIMEOUT);
-        p.release("light.b", BRIGHTNESS, now + SETTLE_TIMEOUT);
+        p.set("light.b", &[(BRIGHTNESS, 50.0)], now + SETTLE_TIMEOUT);
+        p.release("light.b", &[BRIGHTNESS], now + SETTLE_TIMEOUT);
 
         let retired = p.expire(now + SETTLE_TIMEOUT);
         assert_eq!(retired, vec!["light.a".to_owned()]);
@@ -500,10 +835,10 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
-        p.release("light.a", BRIGHTNESS, now);
-        p.set("light.a", TEMP, 3000.0, now);
-        p.release("light.a", TEMP, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
+        p.release("light.a", &[BRIGHTNESS], now);
+        p.set("light.a", &[(TEMP, 3000.0)], now);
+        p.release("light.a", &[TEMP], now);
 
         assert_eq!(p.expire(now + SETTLE_TIMEOUT), vec!["light.a".to_owned()]);
         assert!(p.is_empty());
@@ -514,8 +849,8 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
-        p.release("light.a", BRIGHTNESS, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
+        p.release("light.a", &[BRIGHTNESS], now);
 
         assert!(
             p.expire(now + SETTLE_TIMEOUT - Duration::from_millis(1))
@@ -537,10 +872,10 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
-        p.release("light.a", BRIGHTNESS, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
+        p.release("light.a", &[BRIGHTNESS], now);
         // User grabs the slider again before the window elapses.
-        p.set("light.a", BRIGHTNESS, 200.0, now + SEND_INTERVAL);
+        p.set("light.a", &[(BRIGHTNESS, 200.0)], now + SEND_INTERVAL);
 
         // The old deadline must not still be running.
         assert!(p.expire(now + SETTLE_TIMEOUT).is_empty());
@@ -552,9 +887,9 @@ mod tests {
         let now = t0();
         let mut p = PendingValues::default();
 
-        p.set("light.a", BRIGHTNESS, 100.0, now);
-        p.set("light.a", TEMP, 3000.0, now);
-        p.set("light.b", BRIGHTNESS, 50.0, now);
+        p.set("light.a", &[(BRIGHTNESS, 100.0)], now);
+        p.set("light.a", &[(TEMP, 3000.0)], now);
+        p.set("light.b", &[(BRIGHTNESS, 50.0)], now);
 
         p.clear("light.a");
 

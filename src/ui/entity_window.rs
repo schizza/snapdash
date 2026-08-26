@@ -3,8 +3,9 @@ use iced::{Alignment, Element, Length};
 
 use super::components;
 use crate::app::{EntityWindowState, Message};
-use crate::ha::{ActionKind, ContinuousControl, ContinuousKind};
+use crate::ha::{ActionKind, Axis, AxisKind, Control};
 use crate::theme::{Palette, metric};
+use crate::ui::colour_field;
 use crate::ui::components::IconVisual;
 use crate::ui::format::format_entity_value;
 use crate::ui::icon::Icon;
@@ -100,17 +101,24 @@ fn confirm_prompt<'a>(entity_id: &str, font: f32, gap: f32, p: Palette) -> Eleme
 /// those units, so it reads as a percentage. Position is already a
 /// percentage. A setpoint keeps its own scale, and its step decides
 /// whether a decimal is worth showing.
-fn readout(control: &ContinuousControl, value: f32) -> String {
+fn readout(control: &Axis, value: f32) -> String {
     match control.kind {
-        ContinuousKind::Brightness => {
+        AxisKind::Brightness => {
             let pct = (value / control.max * 100.0).round();
             format!("{pct:.0}%")
         }
         // Kelvin is the unit users actually see on a bulb's box, so it
         // is shown as-is rather than rescaled to a percentage.
-        ContinuousKind::ColorTemp => format!("{:.0}K", value.round()),
-        ContinuousKind::Position => format!("{:.0}%", value.round()),
-        ContinuousKind::Temperature => {
+        AxisKind::ColorTemp => format!("{:.0}K", value.round()),
+        // Degrees around the wheel and percent of colour, which are the
+        // units these values are in. Neither is read by a block of its
+        // own: the colour surface states both at once, in
+        // [`colour_block`], because a colour is one value with two
+        // components rather than two values shown together.
+        AxisKind::Hue => format!("{:.0}°", value.round()),
+        AxisKind::Saturation => format!("{:.0}%", value.round()),
+        AxisKind::Position => format!("{:.0}%", value.round()),
+        AxisKind::Temperature => {
             if control.step < 1.0 {
                 format!("{value:.1}°")
             } else {
@@ -120,49 +128,129 @@ fn readout(control: &ContinuousControl, value: f32) -> String {
     }
 }
 
-fn axis_label(kind: ContinuousKind) -> &'static str {
+fn axis_label(kind: AxisKind) -> &'static str {
     match kind {
-        ContinuousKind::Brightness => "Brightness",
-        ContinuousKind::ColorTemp => "White",
-        ContinuousKind::Temperature => "Target",
-        ContinuousKind::Position => "Position",
+        AxisKind::Brightness => "Brightness",
+        AxisKind::ColorTemp => "White",
+        // Neither of these heads a block of its own: they are the two
+        // axes of the colour surface, which is labelled once, as
+        // "Colour". The names are here because an axis is entitled to
+        // one, not because anything currently draws them.
+        AxisKind::Hue => "Hue",
+        AxisKind::Saturation => "Saturation",
+        AxisKind::Temperature => "Target",
+        AxisKind::Position => "Position",
+    }
+}
+
+/// One control inside an expanded widget.
+///
+/// The dispatch that turns a [`Control`] into its own layout. Each
+/// variant draws itself; this is the only place that decides which.
+fn control_block<'a>(
+    entity_id: &str,
+    view: &ControlView,
+    size: WidgetSize,
+    p: Palette,
+) -> Element<'a, Message> {
+    let font = size.detail_font();
+    let help = shortcut_hint(&view.control);
+
+    match &view.control {
+        Control::Value(axis) => control_row(entity_id, axis, view.value(0), font, help, p),
+        Control::Color { .. } => {
+            colour_block(entity_id, view.value(0), view.value(1), help, size, p)
+        }
+    }
+}
+
+/// What a control's precision shortcuts are, or `None` for a control
+/// that has none.
+///
+/// The one place that decides where the help affordance appears, rather
+/// than each block deciding for itself (#100). Only the colour surface
+/// implements the shortcuts: `iced::widget::slider` reads the pointer's
+/// horizontal offset and nothing else, so the same icon over a
+/// brightness rail would promise help that pressing Shift cannot give.
+///
+/// Answering with the words instead of a `bool` is what keeps the two
+/// facts together. A control that grows shortcuts of its own says so
+/// here and describes them in its own module, and the label row picks
+/// them up without being touched.
+pub fn shortcut_hint(control: &Control) -> Option<&'static str> {
+    match control {
+        Control::Value(_) => None,
+        Control::Color { .. } => Some(colour_field::SHORTCUTS),
+    }
+}
+
+/// How much of its normal presence a control keeps while nothing is
+/// driving the axis it belongs to.
+///
+/// Faint enough to read as "not in play" without a second look, and
+/// solid enough that the label stays legible: the control is still fully
+/// operable, and grabbing it is precisely how the axis gets a value.
+const ABSENT_OPACITY: f32 = 0.4;
+
+/// The same colour, scaled towards transparent.
+///
+/// Scaling the existing alpha rather than replacing it keeps a palette's
+/// own translucency intact, so a theme that already ships a soft rail
+/// does not come back opaque.
+fn fade(color: iced::Color, opacity: f32) -> iced::Color {
+    iced::Color {
+        a: color.a * opacity,
+        ..color
+    }
+}
+
+fn fade_background(background: iced::Background, opacity: f32) -> iced::Background {
+    match background {
+        iced::Background::Color(color) => fade(color, opacity).into(),
+        other => other,
     }
 }
 
 /// One axis inside an expanded widget: a label with its readout, and the
 /// slider beneath.
 ///
-/// The slider renders the *pending* value whenever the user is driving
-/// it, falling back to what HA reported once the interaction reconciles.
-/// Falling back to `min` keeps the slider in range for an entity that
-/// reports no value at all, such as an unavailable light with no
-/// brightness. See `crate::app::pending`.
+/// `value` is what [`ControlView::value`] resolved for this axis, and
+/// `None` there means Home Assistant is reporting the axis as null. The
+/// row then renders as *absent* rather than as sitting at its minimum:
+/// the whole block dims and the knob is not drawn at all. A rail with no
+/// knob says "this axis has no value right now" in a way that cannot be
+/// misread as "the value is at the minimum", which is exactly what a
+/// knob parked hard left over a "0%" readout does say (#94).
+///
+/// Nothing about the row's *behaviour* changes. Grabbing it sends the
+/// same service call, and for a light that is off `light.turn_on` is
+/// also what turns the light on.
 fn control_row<'a>(
     entity_id: &str,
-    control: &ContinuousControl,
-    pending: Option<f32>,
+    control: &Axis,
+    value: Option<f32>,
     font: f32,
+    help: Option<&'static str>,
     p: Palette,
 ) -> Element<'a, Message> {
-    let value = pending
-        .or(control.current)
-        .unwrap_or(control.min)
-        .clamp(control.min, control.max);
+    let absent = value.is_none();
+    let opacity = if absent { ABSENT_OPACITY } else { 1.0 };
 
-    let label = text(axis_label(control.kind))
-        .size(font)
-        .style(move |_: &iced::Theme| iced::widget::text::Style {
-            color: Some(p.text_dim),
-        });
+    // The slider still needs a position in range to lay itself out. It
+    // is the minimum, but with the knob hidden nothing renders there.
+    let position = value.unwrap_or(control.min);
 
-    let value_text = text(readout(control, value))
-        .size(font)
-        .style(move |_: &iced::Theme| iced::widget::text::Style {
-            color: Some(p.text_secondary),
-        });
+    let header = control_header(
+        axis_label(control.kind),
+        value.map(|value| readout(control, value)),
+        font,
+        opacity,
+        help,
+        p,
+    );
 
     let axis = control.kind;
-    let bar = iced::widget::slider(control.min..=control.max, value, {
+    let bar = iced::widget::slider(control.min..=control.max, position, {
         let entity_id = entity_id.to_owned();
         move |value: f32| Message::ControlValueChanged {
             entity_id: entity_id.clone(),
@@ -174,11 +262,180 @@ fn control_row<'a>(
     .on_release(Message::ControlReleased {
         entity_id: entity_id.to_owned(),
         axis,
+    })
+    .style(move |theme: &iced::Theme, status| {
+        let mut style = iced::widget::slider::default(theme, status);
+
+        if absent {
+            style.rail.backgrounds = (
+                fade_background(style.rail.backgrounds.0, ABSENT_OPACITY),
+                fade_background(style.rail.backgrounds.1, ABSENT_OPACITY),
+            );
+            // A transparent handle is how the knob is removed: the
+            // slider keeps its geometry and its hit area, so the row
+            // stays draggable, and only the mark that would claim a
+            // value goes away.
+            style.handle.background = iced::Color::TRANSPARENT.into();
+            style.handle.border_color = iced::Color::TRANSPARENT;
+        }
+
+        style
     });
 
+    column![header, bar].spacing(4).width(Length::Fill).into()
+}
+
+/// The label-and-readout line every control is headed by.
+///
+/// Shared so a colour surface and a slider line their labels up, and so
+/// "the value, or a dash when there is none" is stated once. The dash is
+/// what an absent axis reads as: a readout is a statement about the
+/// device, and an axis the device is not driving has nothing to state.
+///
+/// `help` is the control's precision shortcuts, from [`shortcut_hint`],
+/// and where there are any the line ends with an icon that names them on
+/// hover (#100).
+fn control_header<'a>(
+    label: &'static str,
+    value: Option<String>,
+    font: f32,
+    opacity: f32,
+    help: Option<&'static str>,
+    p: Palette,
+) -> Element<'a, Message> {
+    let label_color = fade(p.text_dim, opacity);
+    let value_color = fade(p.text_secondary, opacity);
+
+    let label = text(label)
+        .size(font)
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(label_color),
+        });
+
+    let value = text(value.unwrap_or_else(|| "-".to_owned()))
+        .size(font)
+        .style(move |_: &iced::Theme| iced::widget::text::Style {
+            color: Some(value_color),
+        });
+
+    let mut line = row![label, space().width(Length::Fill), value].align_y(Alignment::Center);
+
+    if let Some(hint) = help {
+        line = line
+            .push(space().width(HELP_GAP))
+            .push(help_icon(hint, font, opacity, p));
+    }
+
+    line.into()
+}
+
+/// How far the help icon stands off the readout.
+///
+/// Enough that "85%" and the circle do not read as one glyph, and no
+/// more: at Small the line is 132 points wide and the label, the widest
+/// readout and the icon already claim about 100 of them.
+const HELP_GAP: f32 = 4.0;
+
+/// The affordance that says the precision shortcuts exist.
+///
+/// Hover and nothing else. It fires no message, so a press over it falls
+/// through to the card underneath and still drags the widget, which is
+/// what keeps it from becoming a hole in the drag surface
+/// (`docs/adr/0001-widget-interaction-model.md`).
+///
+/// That ADR also keeps hover chrome off an expanded card, because every
+/// pixel the card grew by is a control and an overlay pinned to its
+/// edges swallows the press underneath. This is not that: it sits inside
+/// the control's own layout rather than over a track, it takes its space
+/// from the line it is part of rather than from anything draggable, and
+/// the panel it opens is only up while the pointer is on the icon - so
+/// it is never between the user and a gesture.
+///
+/// Drawn at the label's own size. The glyph fills its em box where the
+/// text only fills its cap height, so at equal nominal sizes the icon
+/// already reads a little larger than the words beside it, and asking
+/// for more would make the help louder than the readout it follows.
+fn help_icon<'a>(hint: &'static str, font: f32, opacity: f32, p: Palette) -> Element<'a, Message> {
+    iced::widget::tooltip(
+        Icon::Help
+            .text(p)
+            .size(font)
+            .color(fade(p.text_dim, opacity)),
+        components::tooltip_message(hint, crate::ui::theme::MessageType::Info, p),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .into()
+}
+
+/// The colour surface inside an expanded widget: a label with its
+/// readout, and the two-dimensional field beneath (#97).
+///
+/// The readout names both axes, in the units they are in - degrees
+/// around the wheel and percent of colour - because a colour is one
+/// value with two components rather than two values shown together.
+///
+/// `hue` and `saturation` are what [`ControlView::value`] resolved, and
+/// `None` in either means Home Assistant is reporting no colour: the
+/// light is off, or sitting in a white mode. The block then renders as
+/// *absent* - dimmed, with no marker at all - for the reason a slider
+/// then renders without a knob. A marker parked in the top-left corner
+/// over a "0°, 0%" readout would be claiming the bulb is showing white,
+/// which is a claim about the house and a false one (#94).
+///
+/// Nothing about its behaviour changes. Dragging it sends the same
+/// service call, and for a light that is off `light.turn_on` carrying
+/// `hs_color` is also what turns the light on.
+fn colour_block<'a>(
+    entity_id: &str,
+    hue: Option<f32>,
+    saturation: Option<f32>,
+    help: Option<&'static str>,
+    size: WidgetSize,
+    p: Palette,
+) -> Element<'a, Message> {
+    let colour = hue.zip(saturation);
+    let opacity = if colour.is_none() {
+        ABSENT_OPACITY
+    } else {
+        1.0
+    };
+
+    let readout = colour.map(|(hue, saturation)| format!("{hue:.0}°, {saturation:.0}%"));
+
+    let field = colour_field::colour_field(
+        colour,
+        size.colour_field_size().height,
+        colour_field::Style {
+            // The plate the spectrum is painted onto, which shows only
+            // through the rounded corners and on the frame before the
+            // texture is resident. It fades with the field so an absent
+            // colour recedes into the card rather than onto a plate.
+            fill: fade(p.card_2, opacity),
+            marker: fade(iced::Color::WHITE, opacity),
+            marker_shadow: fade(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5), opacity),
+            // The one number a slider's rail is faded by, applied to the
+            // surface that stands where a slider's rail would. Colours
+            // are faded by scaling their alpha and a texture cannot be,
+            // so it travels as its own field and the widget hands it to
+            // the renderer.
+            opacity,
+        },
+        {
+            let entity_id = entity_id.to_owned();
+            move |hue: f32, saturation: f32| Message::ColorChanged {
+                entity_id: entity_id.clone(),
+                hue,
+                saturation,
+            }
+        },
+        Message::ColorReleased {
+            entity_id: entity_id.to_owned(),
+        },
+    );
+
     column![
-        row![label, space().width(Length::Fill), value_text].align_y(Alignment::Center),
-        bar,
+        control_header("Colour", readout, size.detail_font(), opacity, help, p),
+        field,
     ]
     .spacing(4)
     .width(Length::Fill)
@@ -216,11 +473,47 @@ pub struct WidgetView<'a> {
     pub settings: crate::config::WidgetSettings,
     pub priority: Priority,
     pub title: String,
-    /// Every axis this entity exposes, each paired with the locally-held
-    /// value if the user is currently driving it. A pending value wins
-    /// over whatever HA last reported. A non-empty list is what earns
-    /// the widget its expand chevron.
-    pub axes: Vec<(ContinuousControl, Option<f32>)>,
+    /// Every control this entity offers, in display order. A non-empty
+    /// list is what earns the widget its expand chevron.
+    pub controls: Vec<ControlView>,
+}
+
+/// One control together with the locally-held value of each axis it
+/// drives, in the same order as [`Control::axes`].
+///
+/// A pending value wins over whatever HA last reported, for as long as
+/// the user is driving that axis (`crate::app::pending`).
+pub struct ControlView {
+    pub control: Control,
+    pub pending: Vec<Option<f32>>,
+}
+
+impl ControlView {
+    /// The pending value of the `n`th axis this control drives.
+    fn pending(&self, index: usize) -> Option<f32> {
+        self.pending.get(index).copied().flatten()
+    }
+
+    /// The value the `n`th axis renders at, or `None` when nothing is
+    /// currently driving it.
+    ///
+    /// A pending value wins while the user is driving that axis, and
+    /// Home Assistant takes over again once the interaction reconciles.
+    ///
+    /// `None` is a reading rather than a gap in the record. Home
+    /// Assistant nulls an axis the device is not currently driving:
+    /// every colour attribute of a light that is off, and
+    /// `color_temp_kelvin` on its own whenever the light is in some
+    /// other colour mode. Answering the axis minimum instead would turn
+    /// "there is no brightness" into "the brightness is zero", which is
+    /// a claim about the bulb, and a false one (#94).
+    pub fn value(&self, index: usize) -> Option<f32> {
+        let axis = self.control.axes().nth(index)?;
+
+        self.pending(index)
+            .or(axis.current)
+            .map(|value| value.clamp(axis.min, axis.max))
+    }
 }
 
 pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
@@ -232,7 +525,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
         settings: widget_settings,
         priority,
         title,
-        axes,
+        controls,
     } = ctx;
 
     let (_friendly, main_opt, detail) = format_main_value(state);
@@ -284,6 +577,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
             // back here and there is no header affordance for them.
             ActionKind::SetBrightness(_)
             | ActionKind::SetColorTemp(_)
+            | ActionKind::SetHs { .. }
             | ActionKind::SetTemperature(_)
             | ActionKind::SetPosition(_) => return None,
         };
@@ -318,7 +612,7 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
     // does something, and the chevron the signal that it has a value
     // worth adjusting. Gated on `connected` for the same reason the
     // action is, a control that cannot reach HA would swallow drags.
-    if !axes.is_empty() && connected {
+    if !controls.is_empty() && connected {
         let (icon, tooltip) = if state.is_expanded() {
             (Icon::ChevronUp, "Hide controls")
         } else {
@@ -445,14 +739,13 @@ pub fn view(ctx: WidgetView<'_>) -> Element<'_, Message> {
         // window of their own, so they cannot drift away from the value
         // they belong to (#87).
         if state.is_expanded() {
-            for (control, pending) in &axes {
+            for view in &controls {
                 inner_column = inner_column
                     .push(space().height(widget_settings.widget_size.value_detail_gap()));
-                inner_column = inner_column.push(control_row(
+                inner_column = inner_column.push(control_block(
                     &state.entity_id,
-                    control,
-                    *pending,
-                    widget_settings.widget_size.detail_font(),
+                    view,
+                    widget_settings.widget_size,
                     p,
                 ));
             }

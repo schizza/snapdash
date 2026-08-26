@@ -39,9 +39,21 @@ A toggle, a scene activation or a script run.
 _Avoid_: tap action, default action
 
 **Axis**:
-One numeric dimension of an entity that is set rather than toggled, such as brightness, white colour temperature, thermostat setpoint or cover position.
+One numeric dimension of an entity that is set rather than toggled, such as brightness, white colour temperature, hue, thermostat setpoint or cover position.
 An entity may expose several at once, each with its own range reported by Home Assistant.
+An axis need not have a control of its own: hue and saturation are two axes driven by a single colour surface.
 _Avoid_: slider, analog, channel
+
+**Absent axis**:
+An axis Home Assistant is currently reporting as `null`, meaning the device is not driving that dimension at all.
+Absent is a reading of the present, not a gap in the record, and it is rendered as such: dimmed, with no knob and no readout.
+It is never rendered as the axis minimum, for reasons recorded in `docs/adr/0006-a-null-axis-renders-as-absent.md`.
+_Avoid_: missing, unknown, zero, unset
+
+**Control**:
+What the user grabs in an expanded widget, and the owner of three things: how it draws, what it sends, and how it recognises its own echo.
+A control may drive more than one axis, which is what separates it from an axis and is recorded in `docs/adr/0004-controls-and-axes.md`.
+_Avoid_: slider, input, field
 
 **Armed**:
 A widget with confirmation enabled that has taken its first tap and is awaiting a second.

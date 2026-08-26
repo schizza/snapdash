@@ -4,7 +4,17 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ha::Control;
 use crate::helpers;
+use crate::theme::metric;
+
+/// The height of the rail a scalar control puts under its label.
+///
+/// `iced::widget::Slider::DEFAULT_HEIGHT`, which these rows do not
+/// override. Named here because the colour surface's height is stated
+/// relative to a slider row's: both are headed by the same
+/// label-and-readout line, and only what sits beneath it differs.
+const SLIDER_HEIGHT: f32 = 16.0;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Adaptive {
@@ -147,7 +157,7 @@ impl WidgetSize {
         }
     }
 
-    /// Height one continuous control adds to an expanded widget (#87):
+    /// Height a single-axis control adds to an expanded widget (#87):
     /// a label with its readout, and the slider under it.
     pub fn control_row_height(self) -> f32 {
         match self {
@@ -157,16 +167,53 @@ impl WidgetSize {
         }
     }
 
-    /// Total height the controls area adds for `axes` controls, or `0.0`
-    /// when the entity has none to show.
+    /// The colour surface's size (#97): the width of a slider track, and
+    /// half as tall.
     ///
-    /// Every row is preceded by its own separating gap, which is how
-    /// `entity_window` builds them: an entity with two axes gets two
+    /// The track is the card's inner width, which is the window less the
+    /// card's padding at both edges - 132, 172 and 212 across the three
+    /// presets. Half as tall is the shape `ui::colour_texture` computes
+    /// the field at, so a degree of hue and a point of saturation are
+    /// about the same distance under the finger, and so that ticket 06
+    /// can draw the texture into these bounds without stretching it.
+    pub fn colour_field_size(self) -> iced::Size {
+        let width = self.window_size().width - 2.0 * metric::PAD;
+
+        iced::Size::new(width, width / 2.0)
+    }
+
+    /// Height one control adds, its own separating gap included.
+    ///
+    /// Every control is preceded by its own gap, which is how
+    /// `entity_window` builds them: an entity with two controls gets two
     /// gaps, not one. Counting a single gap for the whole block left the
-    /// window short by one gap per extra axis, which the last row paid
-    /// for out of its own slack.
-    pub fn controls_height(self, axes: usize) -> f32 {
-        (self.value_detail_gap() + self.control_row_height()) * axes as f32
+    /// window short by one gap per extra control, which the last row
+    /// paid for out of its own slack.
+    pub fn control_height(self, control: &Control) -> f32 {
+        let body = match control {
+            Control::Value(_) => self.control_row_height(),
+            // The same label-and-readout line a slider row is headed by,
+            // with the field standing where the rail would. Taking the
+            // rail out rather than adding to the whole row is what keeps
+            // a colour block and a slider block lining their labels up.
+            Control::Color { .. } => {
+                self.control_row_height() - SLIDER_HEIGHT + self.colour_field_size().height
+            }
+        };
+
+        self.value_detail_gap() + body
+    }
+
+    /// Total height the controls area adds, or `0.0` when the entity has
+    /// none to show.
+    ///
+    /// A sum rather than a multiplication, because controls are not all
+    /// the same height: a colour surface is a field, not a slider.
+    pub fn controls_height(self, controls: &[Control]) -> f32 {
+        controls
+            .iter()
+            .map(|control| self.control_height(control))
+            .sum()
     }
 }
 

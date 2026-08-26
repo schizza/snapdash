@@ -26,19 +26,7 @@ pub fn window_content<'a>(
                 settings: app.config.widget_settings,
                 priority: app.config.priority(entity_id),
                 title: app.display_name(entity_id),
-                axes: app
-                    .ha
-                    .entities
-                    .get(entity_id)
-                    .map(crate::ha::Capabilities::from_state)
-                    .map(|caps| caps.continuous)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|control| {
-                        let pending = app.pending.shown(entity_id, control.kind);
-                        (control, pending)
-                    })
-                    .collect(),
+                controls: app.control_views(entity_id),
             })
         }
         WindowKind::ReleaseNotes => crate::ui::release_notes::view(app, id),
