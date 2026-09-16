@@ -68,6 +68,7 @@ impl Harness {
         app.ha.connection = Some(HaConnectionConfig {
             url: server.uri(),
             token: "test-token".to_owned(),
+            tls: Default::default(),
         });
         app.ha.connected = true;
 

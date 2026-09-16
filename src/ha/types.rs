@@ -67,4 +67,5 @@ pub enum HaEvent {
 pub struct HaConnectionConfig {
     pub url: String,
     pub token: String,
+    pub tls: crate::ha::tls::TlsOptions,
 }

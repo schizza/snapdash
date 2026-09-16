@@ -63,20 +63,70 @@ pub fn view<'a>(snap: &'a Snapdash) -> Element<'a, Message> {
         }
     };
 
-    settings_components::page(
-        "Connection",
-        [
-            settings_components::item_with_input(
-                "Home Assistant URL",
-                Some("Enter fully qualified URL or IP (with http or https prefix)."),
-                "Enter your Home Assistant's URL or IP address ...",
-                &snap.config.ha_url,
-                Message::HaUrlChanged,
-                Some(Message::SavePressed),
-                p,
+    // TLS trust for https:// URLs (#102). A home CA is trusted via its
+    // bundle; the danger toggle is for certificates no store can fix,
+    // and owns a permanent warning rather than a transient status line.
+    let ca_item = match &snap.config.tls_ca_file {
+        None => settings_components::item_with_badge_button(
+            "Custom CA certificate",
+            Some(
+                "Trust your own certificate authority (PEM) in addition \
+                 to the built-in roots - for HTTPS with a home CA.",
             ),
-            token_item,
-        ],
+            "Choose file ...",
+            None,
+            Some(Message::HaCaFilePick),
+            p,
+        ),
+        Some(path) => {
+            let title_element =
+                components::success_message(format!("Trusting CA: {}", path.display()), p);
+            let action_element = components::danger_button_with(
+                Icon::Trash.text(p).size(text_size::LARGE).into(),
+                p,
+                Some(Message::HaCaFileClear),
+            )
+            .into();
+            settings_components::item_with_element(title_element, action_element)
+        }
+    };
+
+    let insecure_item = settings_components::item_with_toggle(
+        "Disable certificate verification",
+        Some(
+            "Connect even when the certificate cannot be validated, \
+             e.g. a self-signed certificate created with CA:TRUE.",
+        ),
+        snap.config.tls_accept_invalid_certs,
+        Message::HaInsecureTlsChanged,
         p,
-    )
+    );
+
+    let mut items = vec![
+        settings_components::item_with_input(
+            "Home Assistant URL",
+            Some("Enter fully qualified URL or IP (with http or https prefix)."),
+            "Enter your Home Assistant's URL or IP address ...",
+            &snap.config.ha_url,
+            Message::HaUrlChanged,
+            Some(Message::SavePressed),
+            p,
+        ),
+        token_item,
+        ca_item,
+        insecure_item,
+    ];
+
+    if snap.config.tls_accept_invalid_certs {
+        items.push(components::error_message(
+            "Danger: Snapdash now trusts whoever answers at this URL. The \
+             connection is encrypted but not authenticated - anyone on your \
+             network could impersonate Home Assistant and capture your \
+             token. Prefer a proper certificate, or a custom CA, whenever \
+             you can.",
+            p,
+        ));
+    }
+
+    settings_components::page("Connection", items, p)
 }

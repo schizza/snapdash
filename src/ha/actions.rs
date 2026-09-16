@@ -23,6 +23,7 @@
 
 use serde_json::Value;
 
+use crate::ha::HaConnectionConfig;
 use crate::ha::types::{EntityState, HaError};
 use crate::ui::format::domain;
 
@@ -43,20 +44,6 @@ const WIDGET_DOMAINS: &[&str] = &[
     "climate",
     "cover",
 ];
-
-/// One process-wide HTTP client, so service calls reuse a pooled
-/// keep-alive connection.
-///
-/// Previously every call constructed `reqwest::Client::new()`, which
-/// builds a fresh connection pool and therefore paid for a new TCP and
-/// TLS handshake per tap. That per-call cost - not HTTP itself - was
-/// what made a WebSocket migration look necessary for phase 2. `Client`
-/// is internally `Arc`'d and explicitly designed to be reused.
-static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-
-fn http() -> &'static reqwest::Client {
-    HTTP.get_or_init(reqwest::Client::new)
-}
 
 /// A concrete Home Assistant service call.
 ///
@@ -748,13 +735,12 @@ pub fn is_widget_candidate(entity_id: &str) -> bool {
 /// normal `state_changed` WS event that follows a successful call,
 /// so this function is fire-and-forget from the caller's perspective.
 pub async fn call_service(
-    ha_url: &str,
-    token: &str,
+    connection: &HaConnectionConfig,
     action: ActionKind,
     entity_id: &str,
 ) -> Result<(), HaError> {
     let call = action.service_call();
-    let base = ha_url.trim_end_matches('/');
+    let base = connection.url.trim_end_matches('/');
     let url = format!("{base}/api/services/{}/{}", call.domain, call.service);
 
     let mut body = serde_json::Map::new();
@@ -763,9 +749,17 @@ pub async fn call_service(
         body.insert(key.into(), value);
     }
 
-    let resp = http()
+    // The shared, TLS-aware client (`ha::tls::http_client`), so service
+    // calls reuse a pooled keep-alive connection: a fresh pool per call
+    // would pay a new TCP and TLS handshake per tap.
+    let resp = crate::ha::tls::http_client(&connection.tls)
+        .map_err(|e| HaError::ServiceCall {
+            entity_id: entity_id.to_owned(),
+            status: None,
+            message: format!("TLS configuration: {e:#}"),
+        })?
         .post(&url)
-        .bearer_auth(token)
+        .bearer_auth(&connection.token)
         .json(&Value::Object(body))
         .send()
         .await
