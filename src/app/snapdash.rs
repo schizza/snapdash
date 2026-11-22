@@ -124,6 +124,13 @@ pub enum Message {
     HaUrlChanged(String),
     HaTokenDelete,
 
+    /// Open the file picker for a custom CA bundle (#102).
+    HaCaFilePick,
+    HaCaFilePicked(Option<std::path::PathBuf>),
+    HaCaFileClear,
+    /// The danger toggle: accept HA's certificate without validating it.
+    HaInsecureTlsChanged(bool),
+
     /// User tapped an actionable widget's header icon. Fires the action,
     /// or arms the widget when its confirmation gate is on. See #81.
     WidgetActionTriggered {
@@ -645,15 +652,7 @@ impl Snapdash {
     ) -> Task<Message> {
         let entity_for_result = entity_id.clone();
         Task::perform(
-            async move {
-                crate::ha::actions::call_service(
-                    &connection.url,
-                    &connection.token,
-                    action,
-                    &entity_id,
-                )
-                .await
-            },
+            async move { crate::ha::actions::call_service(&connection, action, &entity_id).await },
             move |result| Message::WidgetActionResult {
                 entity_id: entity_for_result.clone(),
                 result,
@@ -1416,6 +1415,45 @@ impl Snapdash {
                 Task::none()
             }
 
+            Message::HaCaFilePick => Task::perform(
+                async {
+                    rfd::AsyncFileDialog::new()
+                        .add_filter("PEM certificate", &["pem", "crt", "cer"])
+                        .set_title("Choose the CA certificate to trust")
+                        .pick_file()
+                        .await
+                        .map(|handle| handle.path().to_path_buf())
+                },
+                Message::HaCaFilePicked,
+            ),
+
+            Message::HaCaFilePicked(None) => Task::none(),
+
+            Message::HaCaFilePicked(Some(path)) => {
+                self.config.tls_ca_file = Some(path);
+                self.set_status("CA certificate set", LogType::Info);
+                self.save_config().chain(Task::done(Message::ConnectHa))
+            }
+
+            Message::HaCaFileClear => {
+                self.config.tls_ca_file = None;
+                self.set_status("CA certificate removed", LogType::Info);
+                self.save_config().chain(Task::done(Message::ConnectHa))
+            }
+
+            Message::HaInsecureTlsChanged(on) => {
+                self.config.tls_accept_invalid_certs = on;
+                if on {
+                    self.set_status(
+                        "Certificate verification disabled - the connection is no longer authenticated",
+                        LogType::Warn,
+                    );
+                } else {
+                    self.set_status("Certificate verification enabled", LogType::Info);
+                }
+                self.save_config().chain(Task::done(Message::ConnectHa))
+            }
+
             Message::SavePressed => {
                 self.set_status("Saving...", LogType::DoNotLog);
                 if !self.ha.token_draft.trim().is_empty() {
@@ -1612,6 +1650,7 @@ impl Snapdash {
                 let next_connection = HaConnectionConfig {
                     url: self.config.ha_url.clone(),
                     token: stored_token,
+                    tls: self.config.tls_options(),
                 };
 
                 if self.ha.connection.as_ref() != Some(&next_connection) {

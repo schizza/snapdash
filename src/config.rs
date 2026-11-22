@@ -12,6 +12,15 @@ use crate::{theme::DEFAULT_THEME, widget_size::Priority};
 pub struct Config {
     pub ha_url: String,
     pub ha_token_present: bool,
+    /// Extra root CAs (a PEM bundle) trusted when connecting to HA, for
+    /// home-CA and self-signed setups (#102). `None` means the built-in
+    /// webpki roots alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_ca_file: Option<PathBuf>,
+    /// Accept HA's certificate without validating it. Kept behind an
+    /// explicit danger toggle in Settings; overrides `tls_ca_file`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub tls_accept_invalid_certs: bool,
     #[serde(default = "default_theme_name")]
     pub theme: String,
     #[serde(default)]
@@ -114,6 +123,8 @@ impl Default for Config {
             ha_url: "http://localhost:8123".into(),
             theme: "Mac Dark".into(),
             ha_token_present: false,
+            tls_ca_file: None,
+            tls_accept_invalid_certs: false,
             autostart: false,
             debug_overlay: false,
             widgets: Vec::new(),
@@ -224,6 +235,15 @@ impl Config {
         // and `widgets` is authoritative.
         self.widget_config
             .retain(|entity_id, _| self.widgets.contains(entity_id));
+    }
+
+    /// The TLS trust these settings describe, as the connection carries
+    /// it.
+    pub fn tls_options(&self) -> crate::ha::TlsOptions {
+        crate::ha::TlsOptions {
+            ca_file: self.tls_ca_file.clone(),
+            accept_invalid_certs: self.tls_accept_invalid_certs,
+        }
     }
 
     fn project_dirs() -> Result<ProjectDirs> {
@@ -420,6 +440,34 @@ mod tests {
         let reloaded: Config = serde_json::from_value(json).unwrap();
         assert!(reloaded.require_confirm("switch.pump"));
         assert!(!reloaded.require_confirm("switch.other"));
+    }
+
+    /// TLS trust is off by default, absent from an untouched config,
+    /// and survives a round trip once set (#102).
+    #[test]
+    fn tls_settings_default_off_and_round_trip() {
+        let cfg = Config::default();
+        assert_eq!(cfg.tls_ca_file, None);
+        assert!(!cfg.tls_accept_invalid_certs);
+
+        let untouched = serde_json::to_value(&cfg).unwrap();
+        assert!(untouched.get("tls_ca_file").is_none());
+        assert!(untouched.get("tls_accept_invalid_certs").is_none());
+
+        let mut cfg = cfg;
+        cfg.tls_ca_file = Some(PathBuf::from("/home/user/home-ca.pem"));
+        cfg.tls_accept_invalid_certs = true;
+
+        let reloaded: Config = serde_json::from_value(serde_json::to_value(&cfg).unwrap()).unwrap();
+        assert_eq!(
+            reloaded.tls_ca_file.as_deref(),
+            Some(std::path::Path::new("/home/user/home-ca.pem"))
+        );
+        assert!(reloaded.tls_accept_invalid_certs);
+
+        let options = reloaded.tls_options();
+        assert_eq!(options.ca_file, reloaded.tls_ca_file);
+        assert!(options.accept_invalid_certs);
     }
 
     /// An un-customised widget serializes to nothing at all.

@@ -30,7 +30,12 @@ fn the_buffer_is_one_opaque_rgba_pixel_per_cell() {
 
     assert_eq!(field.0.len(), (WIDTH * HEIGHT * 4) as usize);
     assert!(
-        field.0.chunks_exact(4).all(|pixel| pixel[3] == OPAQUE),
+        field
+            .0
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == OPAQUE),
         "the field is a solid surface, so no pixel may be see-through"
     );
 }
