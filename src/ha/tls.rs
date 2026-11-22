@@ -52,9 +52,16 @@ static HTTP: Mutex<Option<(TlsOptions, reqwest::Client)>> = Mutex::new(None);
 
 /// The shared REST client, built with the given trust.
 ///
-/// Fails when `ca_file` is set but unreadable or not valid PEM - the
-/// caller surfaces that, because a trust the user asked for and did not
-/// get must never silently degrade to "connect anyway".
+/// Fails when the CA bundle is in play but unreadable or unparseable -
+/// the caller surfaces that, because a trust the user asked for and did
+/// not get must never silently degrade to "connect anyway".
+///
+/// The branches mirror [`ws_connector`]'s exactly, `read_ca_bundle`
+/// included, so the two clients cannot disagree about what to trust. In
+/// particular `accept_invalid_certs` never touches the CA file: the
+/// toggle exists for setups whose certificates are beyond fixing, and a
+/// broken bundle path must not fail a client that was told not to
+/// validate anything.
 pub fn http_client(tls: &TlsOptions) -> Result<reqwest::Client> {
     let mut cached = HTTP.lock().expect("HTTP client cache poisoned");
 
@@ -66,29 +73,15 @@ pub fn http_client(tls: &TlsOptions) -> Result<reqwest::Client> {
 
     let mut builder = reqwest::Client::builder();
 
-    if let Some(path) = &tls.ca_file {
-        // reqwest wants its own `Certificate` type, so the bundle is
-        // handed over as PEM bytes rather than through `read_ca_bundle`.
-        // Both parses see the same file; a bundle one accepts and the
-        // other rejects fails the build here, before anything connects.
-        let pem = std::fs::read(path)
-            .with_context(|| format!("cannot read CA bundle {}", path.display()))?;
-        let certs = reqwest::Certificate::from_pem_bundle(&pem)
-            .with_context(|| format!("invalid PEM in CA bundle {}", path.display()))?;
-        // reqwest parses a PEM-free file to zero certificates without
-        // complaint; `read_ca_bundle` documents why that must not pass.
-        anyhow::ensure!(
-            !certs.is_empty(),
-            "no certificates found in {}",
-            path.display()
-        );
-        for cert in certs {
-            builder = builder.add_root_certificate(cert);
-        }
-    }
-
     if tls.accept_invalid_certs {
         builder = builder.danger_accept_invalid_certs(true);
+    } else if let Some(path) = &tls.ca_file {
+        for cert in read_ca_bundle(path)? {
+            builder = builder.add_root_certificate(
+                reqwest::Certificate::from_der(&cert)
+                    .with_context(|| format!("unusable CA certificate in {}", path.display()))?,
+            );
+        }
     }
 
     let client = builder.build().context("failed to build the HTTP client")?;
@@ -130,14 +123,35 @@ pub fn ws_connector(tls: &TlsOptions) -> Result<Option<tokio_tungstenite::Connec
     Ok(Some(tokio_tungstenite::Connector::Rustls(Arc::new(config))))
 }
 
+/// The one parser both clients read the user's CA bundle through, so a
+/// file one accepts and the other rejects cannot exist.
+///
+/// `.crt` and `.cer` exports are as often DER as PEM, and the Settings
+/// file picker offers all three extensions, so the encoding is decided
+/// by content rather than by name: a PEM marker anywhere means a PEM
+/// bundle, anything else is taken as one DER certificate. Whether DER
+/// bytes actually are a certificate is the consumer's check -
+/// `RootCertStore::add` and `reqwest::Certificate::from_der` both
+/// reject garbage, and both call sites name the file when they do.
 fn read_ca_bundle(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
-    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(path)
-        .with_context(|| format!("cannot read CA bundle {}", path.display()))?
+    let bytes =
+        std::fs::read(path).with_context(|| format!("cannot read CA bundle {}", path.display()))?;
+
+    if !bytes
+        .windows(b"-----BEGIN".len())
+        .any(|w| w == b"-----BEGIN")
+    {
+        return Ok(vec![CertificateDer::from(bytes)]);
+    }
+
+    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&bytes)
+        .map(|cert| cert.map(CertificateDer::into_owned))
         .collect::<Result<_, _>>()
         .with_context(|| format!("invalid PEM in CA bundle {}", path.display()))?;
 
-    // An empty bundle parses fine and would silently change nothing -
-    // the one outcome worse than an error for a user debugging trust.
+    // A PEM file holding no *certificate* (say, a private key pasted by
+    // mistake) parses fine and would silently change nothing - the one
+    // outcome worse than an error for a user debugging trust.
     anyhow::ensure!(
         !certs.is_empty(),
         "no certificates found in {}",

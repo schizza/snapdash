@@ -231,8 +231,8 @@ async fn the_home_ca_leaf_is_untrusted_without_the_bundle() {
 }
 
 /// A trust the user asked for and cannot have must be an error, never a
-/// silent downgrade - for both clients, which share the options but not
-/// the parser.
+/// silent downgrade - for both clients, which read the bundle through
+/// the same parser.
 #[test]
 fn a_missing_ca_file_fails_both_clients() {
     let options = TlsOptions {
@@ -244,18 +244,60 @@ fn a_missing_ca_file_fails_both_clients() {
     assert!(http_client(&options).is_err());
 }
 
-/// An empty or non-PEM bundle parses to zero certificates, which would
-/// change nothing while looking configured.
+/// A file that is neither PEM nor a DER certificate is rejected as an
+/// unusable certificate, and a PEM file holding no *certificate* (a
+/// private key pasted by mistake) as an empty bundle - configured-but-
+/// changing-nothing must never pass.
 #[test]
 fn a_bundle_with_no_certificates_fails_both_clients() {
-    let file = pem_file(b"this is not a certificate\n");
+    for contents in [b"this is not a certificate\n".as_slice(), BROKEN_KEY] {
+        let file = pem_file(contents);
+        let options = TlsOptions {
+            ca_file: Some(file.path().to_path_buf()),
+            accept_invalid_certs: false,
+        };
+
+        assert!(ws_connector(&options).is_err());
+        assert!(http_client(&options).is_err());
+    }
+}
+
+/// `.crt`/`.cer` exports are as often DER as PEM, and the file picker
+/// offers both extensions, so the parser decides by content: the same
+/// CA as raw DER trusts the same leaf.
+#[tokio::test]
+async fn a_der_encoded_ca_certificate_is_accepted() {
+    let der: CertificateDer<'static> = CertificateDer::pem_slice_iter(HOME_CA_CERT)
+        .next()
+        .expect("fixture holds a certificate")
+        .expect("fixture parses")
+        .into_owned();
+    let file = pem_file(der.as_ref());
     let options = TlsOptions {
         ca_file: Some(file.path().to_path_buf()),
         accept_invalid_certs: false,
     };
 
-    assert!(ws_connector(&options).is_err());
-    assert!(http_client(&options).is_err());
+    assert!(http_client(&options).is_ok());
+    handshake(&options, LEAF_CERT, LEAF_KEY)
+        .await
+        .expect("a DER-encoded CA trusts a leaf it signed");
+}
+
+/// The danger toggle exists for setups whose certificates are beyond
+/// fixing, so a broken CA path must not fail a client that was told not
+/// to validate anything - on either client.
+#[tokio::test]
+async fn the_danger_toggle_ignores_a_broken_ca_file() {
+    let options = TlsOptions {
+        ca_file: Some("/nonexistent/ca.pem".into()),
+        accept_invalid_certs: true,
+    };
+
+    assert!(http_client(&options).is_ok());
+    handshake(&options, BROKEN_CERT, BROKEN_KEY)
+        .await
+        .expect("validation is off, the CA file is irrelevant");
 }
 
 /// The reqwest side of the same trust: a valid bundle builds, and the
