@@ -24,8 +24,26 @@ pub enum Icon {
     /// flip a boolean state (switch / light / input_boolean).
     Toggle,
     /// Play triangle. Used by actionable widgets that fire a one-shot
-    /// trigger (scene / script).
+    /// trigger (scene / script), and as the affirmative in the widget
+    /// confirmation prompt.
     Play,
+    /// Expands a widget to reveal its continuous controls (#87).
+    ///
+    /// A chevron rather than `Sliders`, which already means "widget
+    /// settings" on the same card, and because an arrow is the only
+    /// shape that says "this opens downwards" on its own.
+    ChevronDown,
+    /// Collapses an expanded widget back to its size preset.
+    ChevronUp,
+    /// A question mark in a circle, sitting beside a control that
+    /// answers modifier keys and the wheel (#100).
+    ///
+    /// Lucide's `circle-help` rather than `info`, because the question
+    /// it answers is "what else can I do here?" rather than anything
+    /// about the state of the house, and rather than [`Icon::Unknown`],
+    /// which is `badge-help` and already means "nothing is known about
+    /// this" wherever it appears.
+    Help,
 }
 
 impl Icon {
@@ -44,8 +62,11 @@ impl Icon {
             Self::ExternalLink => '\u{e0b9}',
             Self::FolderOpen => '\u{e247}',
             Self::Sliders => '\u{e29a}',
-            Self::Toggle => '\u{e18c}', // toggle-right
-            Self::Play => '\u{e13c}',   // play
+            Self::Toggle => '\u{e18c}',      // toggle-right
+            Self::Play => '\u{e13c}',        // play
+            Self::ChevronDown => '\u{e06d}', // chevron-down
+            Self::ChevronUp => '\u{e070}',   // chevron-up
+            Self::Help => '\u{e082}',        // circle-help
         }
     }
 

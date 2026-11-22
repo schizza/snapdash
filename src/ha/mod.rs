@@ -3,13 +3,15 @@
 
 pub mod actions;
 pub mod rest;
+pub mod tls;
 pub mod token;
 pub mod types;
 pub mod ws;
 
 use std::collections::HashMap;
 
-pub use actions::ActionKind;
+pub use actions::{ActionKind, Axis, AxisKind, Capabilities, Control, Outstanding};
+pub use tls::TlsOptions;
 pub use types::{EntityState, HaConnectionConfig, HaEvent};
 
 /// Runtime state for the HA integration. Owned by `Snapdash` as a single

@@ -2,6 +2,7 @@ use iced::widget::{column, container, mouse_area, row, space};
 use iced::{Alignment, Element, Length, window};
 
 use crate::app::{Message, Snapdash};
+use crate::ha::ActionKind;
 use crate::theme::{metric, text_size};
 use crate::ui::components::{self, settings_components};
 use crate::ui::icon::Icon;
@@ -23,12 +24,7 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id, entity_id: &'a str) -> Eleme
         .and_then(|s| s.attributes.get("friendly_name").and_then(|v| v.as_str()))
         .unwrap_or(entity_id);
 
-    let current_override = snap
-        .config
-        .widget_names
-        .get(entity_id)
-        .map(String::as_str)
-        .unwrap_or("");
+    let current_override = snap.config.name_override(entity_id).unwrap_or("");
 
     let display_section = settings_components::section(
         [settings_components::item_with_input(
@@ -47,12 +43,7 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id, entity_id: &'a str) -> Eleme
     );
 
     // Behavior section
-    let current_priority = snap
-        .config
-        .widget_priorities
-        .get(entity_id)
-        .copied()
-        .unwrap_or_default();
+    let current_priority = snap.config.priority(entity_id);
 
     let priority_item = settings_components::item_with_picker(
         "Priority",
@@ -66,10 +57,28 @@ pub fn view<'a>(snap: &'a Snapdash, id: window::Id, entity_id: &'a str) -> Eleme
         p,
     );
 
-    let behavior_section = settings_components::section([priority_item], p);
+    // Only offer the gate to widgets that actually have an action to
+    // gate. On a read-only sensor the toggle would promise something the
+    // widget can never do.
+    let mut behavior_items = vec![priority_item];
+
+    if ActionKind::primary_for_entity(entity_id).is_some() {
+        behavior_items.push(settings_components::item_with_toggle(
+            "Confirm before acting",
+            Some("Ask once before firing this widget's action."),
+            snap.config.require_confirm(entity_id),
+            {
+                let entity_id = entity_id.to_owned();
+                move |on: bool| Message::WidgetRequireConfirmToggled(entity_id.clone(), on)
+            },
+            p,
+        ));
+    }
+
+    let behavior_section = settings_components::section(behavior_items, p);
 
     // --- Visibility section ---
-    let visibility_rule = snap.config.widget_visibility.get(entity_id);
+    let visibility_rule = snap.config.visibility(entity_id);
 
     let toggle_item = settings_components::item_with_toggle(
         "Show only when…",

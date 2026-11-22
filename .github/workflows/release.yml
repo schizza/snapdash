@@ -22,7 +22,7 @@ jobs:
             artifact_name: snapdash
             asset_name: snapdash-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
             archive_cmd: tar -czf
-          - os: macos-14
+          - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: snapdash
             asset_name: snapdash-${{ github.event.release.tag_name }}-macos-aarch64.tar.gz

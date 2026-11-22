@@ -6,8 +6,10 @@
 //! to `snapdash` or `window` doesn't accidentally leak it.
 
 mod lifecycle;
+pub mod pending;
 mod snapdash;
 mod window;
 
+pub use pending::PendingValues;
 pub use snapdash::{FocusDirection, GalleryState, Message, SettingsSensor, Snapdash};
-pub use window::{EntityWindowState, WindowKind, WindowState, find_window_id};
+pub use window::{ARM_TIMEOUT, EntityWindowState, WindowKind, WindowState, find_window_id};

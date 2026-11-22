@@ -159,7 +159,7 @@ If the token is compromised: delete it in HA, generate a new one, paste it into 
 | --- | --- |
 | `sensor.*`, `binary_sensor.*` | Read-only — value, unit and last-changed detail |
 | `switch.*` | Read + tap to **toggle** |
-| `light.*` | Read + tap to **toggle** (on/off only — no brightness or color yet) |
+| `light.*` | Read + tap to **toggle**, expand to set brightness, white temperature and colour |
 | `input_boolean.*` | Read + tap to **toggle** |
 | `scene.*` | Tap to **activate** the scene |
 | `script.*` | Tap to **run** the script |
@@ -201,12 +201,42 @@ Widgets are frameless — the controls appear on hover:
 | Control | Position | Does |
 | --- | --- | --- |
 | **Action button** | top-right | Triggers the entity's action (actionable entities only, while connected) |
+| **Chevron** | top-right | Expands the widget to reveal its continuous controls (entities that have any, while connected) |
 | **Update icon** | top-right | Shown when a new Snapdash release is available — opens the release notes |
 | **Sliders** | right edge | Opens this widget's own settings dialog |
 | **Priority dots** | bottom-left | Quick Low / Normal / High switch |
 | **Gear** | bottom-right | Opens the app Settings window |
 
 Dragging anywhere on the card moves the widget; the position is persisted.
+
+### Adjusting a value
+
+Tap the chevron and the card grows downwards to reveal a control for everything the entity has to set: a slider for a light's brightness, another for its white temperature, and a colour field.
+Tap it again to put them away.
+The controls belong to the widget rather than to a window of their own, so they cannot drift away from the value they set, and each one calls Home Assistant as you drag.
+
+The colour field is two-dimensional - hue runs left to right, saturation top to bottom - and one drag sets both at once, as a single `hs_color`.
+That is a lot of colour in a small space: at the Small preset the field is 132 points wide and covers all 359 degrees of hue, so one point of movement is worth nearly three degrees.
+Three shortcuts answer that, and none of them is a mode you can get stuck in.
+
+| Hold | Does |
+| --- | --- |
+| **Shift** | Holds whichever axis has moved less since you pressed, so you can sweep the hue without disturbing the saturation |
+| **Alt** (Option on macOS) | Keeps a quarter of the movement, measured from where you pressed, so the fine adjustment carries on from where the coarse one had got to |
+| **Wheel** | Nudges the hue one step at a time, and the saturation with Shift held |
+
+Letting go of the key is the whole of undoing it.
+Nothing is remembered between one frame and the next, so a modifier cannot get stuck and a released one stops applying immediately.
+
+The two ends of the saturation axis pull the last few points onto exactly 0% and exactly 100%, so white and full colour are not one-pixel targets.
+Hue has no such magnet, because 0 and 359 are the same red and there is nothing at either end worth snapping to.
+
+The `?` beside the colour readout names the three shortcuts on hover.
+It appears there and nowhere else: the sliders are ordinary sliders, and Shift, Alt and the wheel do nothing on them.
+
+While the controls are up, the hover chrome is gone - not dimmed, absent.
+Every pixel the card grew by is a control, and a priority dot sitting across a slider is one you cannot drag.
+Collapse the widget to get the chrome back.
 
 ## Settings
 

@@ -119,10 +119,21 @@ fn ws_url_from_http(ha_url: &str) -> Result<Url, HaError> {
 }
 
 #[tracing::instrument(skip_all, fields(url = %ws_url))]
-async fn open_session(token: &str, ws_url: &Url) -> Result<(WsSink, WsStream), HaError> {
-    let (ws, _) = tokio_tungstenite::connect_async(ws_url.as_str())
-        .await
-        .map_err(|e| HaError::Connect(e.to_string()))?;
+async fn open_session(
+    token: &str,
+    ws_url: &Url,
+    tls: &crate::ha::tls::TlsOptions,
+) -> Result<(WsSink, WsStream), HaError> {
+    // Rebuilt per attempt on purpose: the connector reads the CA file,
+    // and a user fixing a bad path mid-backoff should be picked up by
+    // the next retry rather than wedging the loop on a stale error.
+    let connector = crate::ha::tls::ws_connector(tls)
+        .map_err(|e| HaError::Connect(format!("TLS configuration: {e:#}")))?;
+
+    let (ws, _) =
+        tokio_tungstenite::connect_async_tls_with_config(ws_url.as_str(), None, false, connector)
+            .await
+            .map_err(|e| HaError::Connect(e.to_string()))?;
 
     let (mut sink, mut stream) = ws.split();
 
@@ -308,7 +319,7 @@ pub fn connect(config: &HaConnectionConfig) -> BoxStream<'static, HaEvent> {
         let mut backoff = INITIAL_BACKOFF;
 
         loop {
-            let (mut sink, mut stream) = match open_session(&cfg.token, &ws_url).await {
+            let (mut sink, mut stream) = match open_session(&cfg.token, &ws_url, &cfg.tls).await {
                 Ok(ws) => {
                     tracing::info!("connected and subscribed to state_changed events");
                     auth_failures = 0;
@@ -356,7 +367,7 @@ pub fn connect(config: &HaConnectionConfig) -> BoxStream<'static, HaEvent> {
 
             // Autenticated + subscribed
             let _ = out.send(HaEvent::Connected).await;
-            let initial = rest::fetch_all_states(&cfg.url, &cfg.token).await;
+            let initial = rest::fetch_all_states(&cfg).await;
 
             tracing::debug!(count = initial.len(), "received initial states");
 
