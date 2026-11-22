@@ -40,15 +40,27 @@ pub struct TlsOptions {
     pub accept_invalid_certs: bool,
 }
 
-/// One process-wide HTTP client per [`TlsOptions`], so service calls
-/// reuse a pooled keep-alive connection.
+/// One process-wide HTTP client per trust, so service calls reuse a
+/// pooled keep-alive connection.
 ///
 /// Previously every call constructed `reqwest::Client::new()`, which
 /// builds a fresh connection pool and therefore paid for a new TCP and
 /// TLS handshake per tap. `Client` is internally `Arc`'d and explicitly
-/// designed to be reused; the cache re-keys only when the user changes
-/// the TLS settings, which tears down the old pool with the old trust.
-static HTTP: Mutex<Option<(TlsOptions, reqwest::Client)>> = Mutex::new(None);
+/// designed to be reused.
+///
+/// Keyed on the options *and the bundle's certificates*, not the path
+/// alone: a CA rotation rewrites the file in place, which changes no
+/// `TlsOptions` field, and the WebSocket - which re-reads the file on
+/// every reconnect - would otherwise pick up the new CA while this
+/// client kept failing with the old one until restart. Re-keying tears
+/// down the old pool with the old trust.
+struct CachedHttp {
+    options: TlsOptions,
+    ca_certs: Vec<CertificateDer<'static>>,
+    client: reqwest::Client,
+}
+
+static HTTP: Mutex<Option<CachedHttp>> = Mutex::new(None);
 
 /// The shared REST client, built with the given trust.
 ///
@@ -63,12 +75,22 @@ static HTTP: Mutex<Option<(TlsOptions, reqwest::Client)>> = Mutex::new(None);
 /// broken bundle path must not fail a client that was told not to
 /// validate anything.
 pub fn http_client(tls: &TlsOptions) -> Result<reqwest::Client> {
+    // Read before consulting the cache, so a rotated bundle is seen.
+    // The price is one read of a small file per service call, against a
+    // peak of ~5 calls/sec during a drag - noise next to the call's own
+    // round trip, and the bytes double as the build input on a miss.
+    let ca_certs = match (&tls.ca_file, tls.accept_invalid_certs) {
+        (Some(path), false) => read_ca_bundle(path)?,
+        _ => Vec::new(),
+    };
+
     let mut cached = HTTP.lock().expect("HTTP client cache poisoned");
 
-    if let Some((key, client)) = cached.as_ref()
-        && key == tls
+    if let Some(hit) = cached.as_ref()
+        && hit.options == *tls
+        && hit.ca_certs == ca_certs
     {
-        return Ok(client.clone());
+        return Ok(hit.client.clone());
     }
 
     let mut builder = reqwest::Client::builder();
@@ -76,16 +98,20 @@ pub fn http_client(tls: &TlsOptions) -> Result<reqwest::Client> {
     if tls.accept_invalid_certs {
         builder = builder.danger_accept_invalid_certs(true);
     } else if let Some(path) = &tls.ca_file {
-        for cert in read_ca_bundle(path)? {
+        for cert in &ca_certs {
             builder = builder.add_root_certificate(
-                reqwest::Certificate::from_der(&cert)
+                reqwest::Certificate::from_der(cert)
                     .with_context(|| format!("unusable CA certificate in {}", path.display()))?,
             );
         }
     }
 
     let client = builder.build().context("failed to build the HTTP client")?;
-    *cached = Some((tls.clone(), client.clone()));
+    *cached = Some(CachedHttp {
+        options: tls.clone(),
+        ca_certs,
+        client: client.clone(),
+    });
     Ok(client)
 }
 

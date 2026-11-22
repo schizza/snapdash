@@ -300,6 +300,31 @@ async fn the_danger_toggle_ignores_a_broken_ca_file() {
         .expect("validation is off, the CA file is irrelevant");
 }
 
+/// A CA rotation rewrites the bundle in place, which changes no
+/// `TlsOptions` field - the cache must key on the contents, or the REST
+/// client keeps the old trust until restart while the WebSocket (which
+/// re-reads per reconnect) has already moved on.
+#[test]
+fn an_in_place_ca_rotation_rekeys_the_http_client() {
+    let (options, file) = options_with_ca(HOME_CA_CERT);
+    assert!(http_client(&options).is_ok());
+
+    // Same path, new contents. A broken bundle is the observable proxy
+    // for "the file was re-read": a path-keyed cache would keep
+    // answering Ok from the stale client.
+    std::fs::write(file.path(), b"rotated to garbage").expect("rewrite bundle");
+    assert!(
+        http_client(&options).is_err(),
+        "the rotated bundle must be re-read, not served from cache"
+    );
+
+    std::fs::write(file.path(), BROKEN_CERT).expect("rewrite bundle");
+    assert!(
+        http_client(&options).is_ok(),
+        "a valid rotated bundle builds a fresh client"
+    );
+}
+
 /// The reqwest side of the same trust: a valid bundle builds, and the
 /// danger toggle builds without one.
 #[test]
