@@ -40,29 +40,30 @@ pub fn pick_asset(release: &Release) -> Result<UpdateAsset> {
         target_pattern().ok_or_else(|| anyhow!("no update asset for this platform/arch"))?;
 
     let archive = release
-        .assets
+        .assets()
         .iter()
         .find(|a| {
-            a.name.contains(pattern) && (a.name.ends_with(".tar.gz") || a.name.ends_with(".zip"))
+            a.name().contains(pattern)
+                && (a.name().ends_with(".tar.gz") || a.name().ends_with(".zip"))
         })
         .ok_or_else(|| {
             anyhow!(
                 "no archive matching '{pattern}' in release {}",
-                release.version
+                release.version()
             )
         })?;
 
-    let checksum_name = format!("{}.sha256", archive.name);
+    let checksum_name = format!("{}.sha256", archive.name());
     let checksum = release
-        .assets
+        .assets()
         .iter()
-        .find(|a| a.name == checksum_name)
+        .find(|a| a.name() == checksum_name)
         .ok_or_else(|| anyhow!("missing {checksum_name} in release"))?;
 
     Ok(UpdateAsset {
-        archive_url: archive.download_url.clone(),
-        checksum_url: checksum.download_url.clone(),
-        archive_name: archive.name.clone(),
+        archive_url: archive.download_url().to_owned(),
+        checksum_url: checksum.download_url().to_owned(),
+        archive_name: archive.name().to_owned(),
     })
 }
 
@@ -78,6 +79,7 @@ pub fn fetch_latest_release() -> Result<Release> {
         .context("fetch release")?;
 
     releases
+        .into_vec()
         .into_iter()
         .next()
         .ok_or_else(|| anyhow!("no releases published"))
